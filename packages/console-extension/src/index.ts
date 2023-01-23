@@ -29,7 +29,11 @@ import {
   IPositionModel
 } from '@jupyterlab/codeeditor';
 import { ICompletionProviderManager } from '@jupyterlab/completer';
-import { ConsolePanel, IConsoleTracker } from '@jupyterlab/console';
+import {
+  CodeConsole,
+  ConsolePanel,
+  IConsoleTracker
+} from '@jupyterlab/console';
 import { IFileBrowserFactory } from '@jupyterlab/filebrowser';
 import { ILauncher } from '@jupyterlab/launcher';
 import { IMainMenu } from '@jupyterlab/mainmenu';
@@ -348,6 +352,8 @@ async function activateConsole(
      * Its typical value is: a factory name or the widget id (if singleton)
      */
     type?: string;
+
+    promptCellPosition: CodeConsole.promptCellPosition;
   }
 
   /**
@@ -478,6 +484,7 @@ async function activateConsole(
   const pluginId = '@jupyterlab/console-extension:tracker';
   let interactionMode: string;
   let promptCellConfig: JSONObject;
+  let promptCellPosition: CodeConsole.promptCellPosition;
 
   /**
    * Update settings for one console or all consoles.
@@ -489,6 +496,9 @@ async function activateConsole(
       .composite as string;
     promptCellConfig = (await settingRegistry.get(pluginId, 'promptCellConfig'))
       .composite as JSONObject;
+    promptCellPosition = (
+      await settingRegistry.get(pluginId, 'promptCellPosition')
+    ).composite as CodeConsole.promptCellPosition;
 
     const setWidgetOptions = (widget: ConsolePanel) => {
       widget.console.node.dataset.jpInteractionMode = interactionMode;
@@ -570,7 +580,7 @@ async function activateConsole(
             return item.path === path;
           });
           if (model) {
-            return createConsole(args);
+            return createConsole({ ...args, promptCellPosition });
           }
           return Promise.reject(`No running kernel session for path: ${path}`);
         });
@@ -602,7 +612,7 @@ async function activateConsole(
           (args['cwd'] as string) ||
           browserFactory?.defaultBrowser.model.path) ??
         '';
-      return createConsole({ basePath, ...args });
+      return createConsole({ basePath, promptCellPosition, ...args });
     }
   });
 
