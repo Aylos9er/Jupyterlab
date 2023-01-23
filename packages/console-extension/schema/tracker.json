@@ -211,8 +211,8 @@
       }
     },
     "promptCellPosition": {
-      "title": "Input Cell Position",
-      "description": "Whether to place the input cell at the bottom or the top of the console.",
+      "title": "Prompt Cell Position",
+      "description": "Whether to place the prompt cell at the bottom or the top of the console.",
       "type": "string",
       "enum": ["bottom", "top"],
       "default": "bottom"
