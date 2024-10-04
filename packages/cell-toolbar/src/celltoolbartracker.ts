@@ -62,13 +62,15 @@ export class CellToolbarTracker implements IDisposable {
     toolbar?: IObservableList<ToolbarRegistry.IToolbarItem>,
     toolbarFactory?: (
       widget: Cell
-    ) => IObservableList<ToolbarRegistry.IToolbarItem>
+    ) => IObservableList<ToolbarRegistry.IToolbarItem>,
+    helperButtons?: Widget[]
   ) {
     this._panel = panel;
     this._previousActiveCell = this._panel.content.activeCell;
     this._toolbarItems = toolbar ?? null;
     this._toolbarFactory = toolbarFactory ?? null;
     this._enabled = true; // If this has been set to false, it will be modified after settings are available
+    this._helperButtons = helperButtons ?? [];
 
     if (this._toolbarItems === null && this._toolbarFactory === null) {
       throw Error('You must provide the toolbarFactory or the toolbar items.');
@@ -168,6 +170,21 @@ export class CellToolbarTracker implements IDisposable {
     this._onToolbarChanged();
   }
 
+  /**
+   * Whether the cell toolbar is shown, if there is enough room
+   */
+  get showHelperButtons(): boolean {
+    return this._showHelperButtons;
+  }
+
+  /**
+   * Sets whether the cell toolbar is shown, if there is enough room
+   */
+  set showHelperButtons(value: boolean) {
+    this._showHelperButtons = value;
+    this._onToolbarChanged();
+  }
+
   dispose(): void {
     if (this.isDisposed) {
       return;
@@ -183,15 +200,10 @@ export class CellToolbarTracker implements IDisposable {
   }
 
   private _addToolbar(model: ICellModel): void {
-    // Do nothing if the toolbar shouldn't be visible.
-    if (!this.enabled) {
-      return;
-    }
-
     const cell = this._getCell(model);
 
     if (cell && !cell.isDisposed) {
-      const toolbarWidget = (this._toolbar = new Toolbar());
+      const toolbarWidget = new Toolbar();
       // Note: CELL_MENU_CLASS is deprecated.
       toolbarWidget.addClass(CELL_MENU_CLASS);
       toolbarWidget.addClass(CELL_TOOLBAR_CLASS);
@@ -224,22 +236,48 @@ export class CellToolbarTracker implements IDisposable {
             return;
           }
 
-          // Hide the toolbar by default, to avoid temporary overlapping.
-          cell.node.classList.add(TOOLBAR_OVERLAP_CLASS);
+          // Skip adding the toolbar if the toolbar shouldn't be visible.
+          if (this.enabled) {
+            this._toolbar = toolbarWidget;
 
-          (cell.inputArea!.layout as PanelLayout).insertWidget(
-            0,
-            toolbarWidget
-          );
+            // Hide the toolbar by default, to avoid temporary overlapping.
+            cell.node.classList.add(TOOLBAR_OVERLAP_CLASS);
 
-          // For rendered markdown, watch for resize events.
-          cell.displayChanged.connect(this._resizeEventCallback, this);
+            (cell.inputArea!.layout as PanelLayout).insertWidget(
+              0,
+              toolbarWidget
+            );
 
-          // Watch for changes in the cell's contents.
-          cell.model.contentChanged.connect(this._changedEventCallback, this);
+            // For rendered markdown, watch for resize events.
+            cell.displayChanged.connect(this._resizeEventCallback, this);
 
-          // Hide the cell toolbar if it overlaps with cell contents
-          this._updateCellForToolbarOverlap(cell);
+            // Watch for changes in the cell's contents.
+            cell.model.contentChanged.connect(this._changedEventCallback, this);
+
+            // Hide the cell toolbar if it overlaps with cell contents
+            this._updateCellForToolbarOverlap(cell);
+          } else {
+            // If the toolbar was just disabled, dispose of it.
+            if (this._toolbar !== null && !this._toolbar.isDisposed) {
+              this._toolbar.dispose();
+            }
+          }
+
+          // Add the helper buttons to the cell's input area, if desired.
+          if (cell.inputArea) {
+            if (this.showHelperButtons) {
+              cell.inputArea.prompt.promptToolbarEnabled = true;
+              this._helperButtons.forEach(
+                b => cell.inputArea!.prompt.promptToolbar?.addItem(b.id, b)
+              );
+            } else {
+              // If no helper buttons are desired, don't show the helper button toolbar
+              cell.inputArea.prompt.promptToolbarEnabled = false;
+            }
+
+            // Show or hide the prompt toolbar.
+            cell.inputArea.prompt.update();
+          }
         })
         .catch(e => {
           console.error('Error rendering buttons of the cell toolbar: ', e);
@@ -318,15 +356,13 @@ export class CellToolbarTracker implements IDisposable {
   }
 
   private _cellToolbarOverlapsContents(activeCell: Cell<ICellModel>): boolean {
-    // Fail safe when the active cell is not ready yet
-    if (!activeCell.model) {
+    if (activeCell.model === null) {
       return false;
     }
 
     const cellType = activeCell.model.type;
 
     // If the toolbar is too large for the current cell, hide it.
-
     const editorRect = activeCell.editorWidget?.node.getBoundingClientRect();
     const cellLeft = editorRect?.left ?? 0;
     const cellRight = editorRect?.right ?? 0;
@@ -468,12 +504,14 @@ export class CellToolbarTracker implements IDisposable {
   private _isDisposed = false;
   private _panel: NotebookPanel | null;
   private _previousActiveCell: Cell<ICellModel> | null;
+  private _showHelperButtons: boolean;
   private _toolbar: Widget | null = null;
   private _toolbarItems: IObservableList<ToolbarRegistry.IToolbarItem> | null =
     null;
   private _toolbarFactory:
     | ((widget: Cell) => IObservableList<ToolbarRegistry.IToolbarItem>)
     | null = null;
+  private _helperButtons: Widget[];
 }
 
 const defaultToolbarItems: ToolbarRegistry.IWidget[] = [
@@ -514,10 +552,12 @@ export class CellBarExtension implements DocumentRegistry.WidgetExtension {
     commands: CommandRegistry,
     toolbarFactory?: (
       widget: Widget
-    ) => IObservableList<ToolbarRegistry.IToolbarItem>
+    ) => IObservableList<ToolbarRegistry.IToolbarItem>,
+    helperButtons?: Widget[]
   ) {
     this._commands = commands;
     this._toolbarFactory = toolbarFactory ?? this.defaultToolbarFactory;
+    this._helperButtons = helperButtons ?? [];
   }
 
   protected get defaultToolbarFactory(): (
@@ -539,7 +579,8 @@ export class CellBarExtension implements DocumentRegistry.WidgetExtension {
     return (this._tracker = new CellToolbarTracker(
       panel,
       undefined,
-      this._toolbarFactory
+      this._toolbarFactory,
+      this._helperButtons
     ));
   }
 
@@ -559,7 +600,22 @@ export class CellBarExtension implements DocumentRegistry.WidgetExtension {
     }
   }
 
+  /**
+   * Whether any helper buttons are displayed
+   */
+  get showHelperButtons(): boolean {
+    return this._tracker.showHelperButtons;
+  }
+
+  /**
+   * Sets whether any helper buttons are displayed
+   */
+  set showHelperButtons(value: boolean) {
+    this._tracker.showHelperButtons = value;
+  }
+
   private _commands: CommandRegistry;
+  private _helperButtons: Widget[];
   private _toolbarFactory: (
     widget: Widget
   ) => IObservableList<ToolbarRegistry.IToolbarItem>;

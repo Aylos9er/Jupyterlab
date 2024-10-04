@@ -14,6 +14,7 @@ import {
 import { ISettingRegistry } from '@jupyterlab/settingregistry';
 import { CellBarExtension } from '@jupyterlab/cell-toolbar';
 import {
+  CommandToolbarButton,
   createToolbarFactory,
   IToolbarWidgetRegistry
 } from '@jupyterlab/apputils';
@@ -43,7 +44,13 @@ const cellToolbar: JupyterFrontEndPlugin<void> = {
           ? true
           : (setting.get('showToolbar').composite as boolean);
 
+      const showRunButton: boolean | null =
+        setting === null
+          ? true
+          : (setting.get('showRunButton').composite as boolean);
+
       extension.enabled = showCellToolbar;
+      extension.showHelperButtons = showRunButton;
     }
 
     const toolbarItems =
@@ -57,7 +64,33 @@ const cellToolbar: JupyterFrontEndPlugin<void> = {
           )
         : undefined;
 
-    const extension = new CellBarExtension(app.commands, toolbarItems);
+    const helperButtons = [];
+
+    // Only display a run button if the settings say to do so. Default to use.
+    let showRunButton = true;
+    if (settingRegistry !== null) {
+      const settings = settingRegistry!.load(cellToolbar.id);
+      showRunButton = (await settings).get('showRunButton')
+        .composite as boolean;
+    }
+
+    if (showRunButton) {
+      helperButtons.push(
+        new CommandToolbarButton({
+          commands: app.commands,
+          id: 'notebook:run-cell-and-select-next',
+          args: { toolbar: true },
+          // Do not display a text label beside the button
+          label: ''
+        })
+      );
+    }
+
+    const extension = new CellBarExtension(
+      app.commands,
+      toolbarItems,
+      helperButtons
+    );
 
     // Wait for the application to be restored and
     // for the settings for this plugin to be loaded
