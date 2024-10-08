@@ -1,26 +1,14 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import { ArrayExt } from '@phosphor/algorithm';
-
+import { ArrayExt } from '@lumino/algorithm';
 import {
   DisposableDelegate,
   DisposableSet,
   IDisposable
-} from '@phosphor/disposable';
-
-import { Message } from '@phosphor/messaging';
-
-import { Widget, Panel, PanelLayout } from '@phosphor/widgets';
-
-import {
-  statusBar as barStyle,
-  side as sideStyle,
-  item as itemStyle,
-  leftSide as leftSideStyle,
-  rightSide as rightSideStyle
-} from './style/statusbar';
-
+} from '@lumino/disposable';
+import { Message } from '@lumino/messaging';
+import { Panel, PanelLayout, Widget } from '@lumino/widgets';
 import { IStatusBar } from './tokens';
 
 /**
@@ -29,21 +17,17 @@ import { IStatusBar } from './tokens';
 export class StatusBar extends Widget implements IStatusBar {
   constructor() {
     super();
-    this.addClass(barStyle);
+    this.addClass('jp-StatusBar-Widget');
 
-    let rootLayout = (this.layout = new PanelLayout());
+    const rootLayout = (this.layout = new PanelLayout());
 
-    let leftPanel = (this._leftSide = new Panel());
-    let middlePanel = (this._middlePanel = new Panel());
-    let rightPanel = (this._rightSide = new Panel());
+    const leftPanel = (this._leftSide = new Panel());
+    const middlePanel = (this._middlePanel = new Panel());
+    const rightPanel = (this._rightSide = new Panel());
 
-    leftPanel.addClass(sideStyle);
-    leftPanel.addClass(leftSideStyle);
-
-    middlePanel.addClass(sideStyle);
-
-    rightPanel.addClass(sideStyle);
-    rightPanel.addClass(rightSideStyle);
+    leftPanel.addClass('jp-StatusBar-Left');
+    middlePanel.addClass('jp-StatusBar-Middle');
+    rightPanel.addClass('jp-StatusBar-Right');
 
     rootLayout.addWidget(leftPanel);
     rootLayout.addWidget(middlePanel);
@@ -54,8 +38,9 @@ export class StatusBar extends Widget implements IStatusBar {
    * Register a new status item.
    *
    * @param id - a unique id for the status item.
-   *
    * @param statusItem - The item to add to the status bar.
+   *
+   * @returns Disposable status bar item
    */
   registerStatusItem(id: string, statusItem: IStatusBar.IItem): IDisposable {
     if (id in this._statusItems) {
@@ -63,25 +48,28 @@ export class StatusBar extends Widget implements IStatusBar {
     }
 
     // Populate defaults for the optional properties of the status item.
-    statusItem = { ...Private.statusItemDefaults, ...statusItem };
-    const { align, item, rank } = statusItem;
+    const fullStatusItem = {
+      ...Private.statusItemDefaults,
+      ...statusItem
+    } as Private.IFullItem;
+    const { align, item, rank, priority } = fullStatusItem;
 
     // Connect the activeStateChanged signal to refreshing the status item,
     // if the signal was provided.
     const onActiveStateChanged = () => {
       this._refreshItem(id);
     };
-    if (statusItem.activeStateChanged) {
-      statusItem.activeStateChanged.connect(onActiveStateChanged);
+    if (fullStatusItem.activeStateChanged) {
+      fullStatusItem.activeStateChanged.connect(onActiveStateChanged);
     }
 
-    let rankItem = { id, rank };
+    const rankItem = { id, rank, priority };
 
-    statusItem.item.addClass(itemStyle);
-    this._statusItems[id] = statusItem;
+    fullStatusItem.item.addClass('jp-StatusBar-Item');
+    this._statusItems[id] = fullStatusItem;
 
     if (align === 'left') {
-      let insertIndex = this._findInsertIndex(this._leftRankItems, rankItem);
+      const insertIndex = this._findInsertIndex(this._leftRankItems, rankItem);
       if (insertIndex === -1) {
         this._leftSide.addWidget(item);
         this._leftRankItems.push(rankItem);
@@ -90,7 +78,7 @@ export class StatusBar extends Widget implements IStatusBar {
         this._leftSide.insertWidget(insertIndex, item);
       }
     } else if (align === 'right') {
-      let insertIndex = this._findInsertIndex(this._rightRankItems, rankItem);
+      const insertIndex = this._findInsertIndex(this._rightRankItems, rankItem);
       if (insertIndex === -1) {
         this._rightSide.addWidget(item);
         this._rightRankItems.push(rankItem);
@@ -105,8 +93,8 @@ export class StatusBar extends Widget implements IStatusBar {
 
     const disposable = new DisposableDelegate(() => {
       delete this._statusItems[id];
-      if (statusItem.activeStateChanged) {
-        statusItem.activeStateChanged.disconnect(onActiveStateChanged);
+      if (fullStatusItem.activeStateChanged) {
+        fullStatusItem.activeStateChanged.disconnect(onActiveStateChanged);
       }
       item.parent = null;
       item.dispose();
@@ -118,17 +106,25 @@ export class StatusBar extends Widget implements IStatusBar {
   /**
    * Dispose of the status bar.
    */
-  dispose() {
+  dispose(): void {
     this._leftRankItems.length = 0;
     this._rightRankItems.length = 0;
     this._disposables.dispose();
     super.dispose();
   }
 
+  private _isWindowNarrow = () => {
+    // The value for 630px was chosen by trial and error.
+    // When the screen width drops below 630px, there is no
+    // longer enough space for all the items in the status bar
+    // (with notebook open), and items become clipped.
+    return window.innerWidth <= 630;
+  };
+
   /**
    * Handle an 'update-request' message to the status bar.
    */
-  protected onUpdateRequest(msg: Message) {
+  protected onUpdateRequest(msg: Message): void {
     this._refreshAll();
     super.onUpdateRequest(msg);
   }
@@ -142,7 +138,10 @@ export class StatusBar extends Widget implements IStatusBar {
 
   private _refreshItem(id: string) {
     const statusItem = this._statusItems[id];
-    if (statusItem.isActive()) {
+    if (
+      statusItem.isActive() &&
+      !(statusItem.priority === 0 && this._isWindowNarrow())
+    ) {
       statusItem.item.show();
       statusItem.item.update();
     } else {
@@ -158,7 +157,7 @@ export class StatusBar extends Widget implements IStatusBar {
 
   private _leftRankItems: Private.IRankItem[] = [];
   private _rightRankItems: Private.IRankItem[] = [];
-  private _statusItems: { [id: string]: IStatusBar.IItem } = {};
+  private _statusItems: { [id: string]: Private.IFullItem } = {};
   private _disposables = new DisposableSet();
   private _leftSide: Panel;
   private _middlePanel: Panel;
@@ -176,6 +175,7 @@ namespace Private {
   export const statusItemDefaults: Omit<IStatusBar.IItem, 'item'> = {
     align: 'left',
     rank: 0,
+    priority: 0,
     isActive: () => true,
     activeStateChanged: undefined
   };
@@ -186,5 +186,14 @@ namespace Private {
   export interface IRankItem {
     id: string;
     rank: number;
+    priority?: number;
   }
+
+  export type DefaultKeys = 'align' | 'rank' | 'isActive' | 'priority';
+
+  /**
+   * Type of statusbar item with defaults filled in.
+   */
+  export type IFullItem = Required<Pick<IStatusBar.IItem, DefaultKeys>> &
+    Omit<IStatusBar.IItem, DefaultKeys>;
 }

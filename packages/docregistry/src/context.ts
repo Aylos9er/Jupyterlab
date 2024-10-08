@@ -2,34 +2,31 @@
 // Distributed under the terms of the Modified BSD License.
 
 import {
-  Contents,
-  ServiceManager,
-  ServerConnection
-} from '@jupyterlab/services';
-
-import { JSONValue, PromiseDelegate } from '@phosphor/coreutils';
-
-import { IDisposable, DisposableDelegate } from '@phosphor/disposable';
-
-import { ISignal, Signal } from '@phosphor/signaling';
-
-import { Widget } from '@phosphor/widgets';
-
-import {
-  showDialog,
-  ClientSession,
   Dialog,
-  IClientSession,
+  ISessionContext,
+  SessionContext,
+  SessionContextDialogs,
+  showDialog,
   showErrorMessage
 } from '@jupyterlab/apputils';
-
 import { PathExt } from '@jupyterlab/coreutils';
-
-import { IModelDB, ModelDB } from '@jupyterlab/observables';
-
 import { RenderMimeRegistry } from '@jupyterlab/rendermime';
-
 import { IRenderMime } from '@jupyterlab/rendermime-interfaces';
+import {
+  Contents,
+  ServerConnection,
+  ServiceManager
+} from '@jupyterlab/services';
+import {
+  ITranslator,
+  nullTranslator,
+  TranslationBundle
+} from '@jupyterlab/translation';
+
+import { PartialJSONValue, PromiseDelegate } from '@lumino/coreutils';
+import { DisposableDelegate, IDisposable } from '@lumino/disposable';
+import { ISignal, Signal } from '@lumino/signaling';
+import { Widget } from '@lumino/widgets';
 
 import { DocumentRegistry } from './registry';
 
@@ -38,46 +35,63 @@ import { DocumentRegistry } from './registry';
  *
  * This class is typically instantiated by the document manager.
  */
-export class Context<T extends DocumentRegistry.IModel>
-  implements DocumentRegistry.IContext<T> {
+export class Context<
+  T extends DocumentRegistry.IModel = DocumentRegistry.IModel
+> implements DocumentRegistry.IContext<T>
+{
   /**
    * Construct a new document context.
    */
   constructor(options: Context.IOptions<T>) {
-    let manager = (this._manager = options.manager);
+    const manager = (this._manager = options.manager);
+    this.translator = options.translator || nullTranslator;
+    this._trans = this.translator.load('jupyterlab');
     this._factory = options.factory;
+    this._dialogs =
+      options.sessionDialogs ??
+      new SessionContextDialogs({ translator: options.translator });
     this._opener = options.opener || Private.noOp;
     this._path = this._manager.contents.normalize(options.path);
+    this._lastModifiedCheckMargin = options.lastModifiedCheckMargin || 500;
     const localPath = this._manager.contents.localPath(this._path);
-    let lang = this._factory.preferredLanguage(PathExt.basename(localPath));
+    const lang = this._factory.preferredLanguage(PathExt.basename(localPath));
 
-    let dbFactory = options.modelDBFactory;
-    if (dbFactory) {
-      const localPath = manager.contents.localPath(this._path);
-      this._modelDB = dbFactory.createNew(localPath);
-      this._model = this._factory.createNew(lang, this._modelDB);
-    } else {
-      this._model = this._factory.createNew(lang);
-    }
+    const sharedFactory = this._manager.contents.getSharedModelFactory(
+      this._path
+    );
+    const sharedModel = sharedFactory?.createNew({
+      path: localPath,
+      format: this._factory.fileFormat,
+      contentType: this._factory.contentType,
+      collaborative: this._factory.collaborative
+    });
+
+    this._model = this._factory.createNew({
+      languagePreference: lang,
+      sharedModel,
+      collaborationEnabled: sharedFactory?.collaborative ?? false
+    });
 
     this._readyPromise = manager.ready.then(() => {
       return this._populatedPromise.promise;
     });
 
-    let ext = PathExt.extname(this._path);
-    this.session = new ClientSession({
-      manager: manager.sessions,
-      path: this._path,
+    const ext = PathExt.extname(this._path);
+    this.sessionContext = new SessionContext({
+      kernelManager: manager.kernels,
+      sessionManager: manager.sessions,
+      specsManager: manager.kernelspecs,
+      path: localPath,
       type: ext === '.ipynb' ? 'notebook' : 'file',
       name: PathExt.basename(localPath),
       kernelPreference: options.kernelPreference || { shouldStart: false },
       setBusy: options.setBusy
     });
-    this.session.propertyChanged.connect(this._onSessionChanged, this);
+    this.sessionContext.propertyChanged.connect(this._onSessionChanged, this);
     manager.contents.fileChanged.connect(this._onFileChanged, this);
 
     this.urlResolver = new RenderMimeRegistry.UrlResolver({
-      session: this.session,
+      path: this._path,
       contents: manager.contents
     });
   }
@@ -92,7 +106,7 @@ export class Context<T extends DocumentRegistry.IModel>
   /**
    * A signal emitted when the model is saved or reverted.
    */
-  get fileChanged(): ISignal<this, Contents.IModel> {
+  get fileChanged(): ISignal<this, Omit<Contents.IModel, 'content'>> {
     return this._fileChanged;
   }
 
@@ -111,6 +125,17 @@ export class Context<T extends DocumentRegistry.IModel>
   }
 
   /**
+   * Configurable margin used to detect document modification conflicts, in milliseconds
+   */
+  get lastModifiedCheckMargin(): number {
+    return this._lastModifiedCheckMargin;
+  }
+
+  set lastModifiedCheckMargin(value: number) {
+    this._lastModifiedCheckMargin = value;
+  }
+
+  /**
    * Get the model associated with the document.
    */
   get model(): T {
@@ -120,7 +145,7 @@ export class Context<T extends DocumentRegistry.IModel>
   /**
    * The client session object associated with the context.
    */
-  readonly session: ClientSession;
+  readonly sessionContext: SessionContext;
 
   /**
    * The current path associated with the document.
@@ -139,14 +164,14 @@ export class Context<T extends DocumentRegistry.IModel>
   }
 
   /**
-   * The current contents model associated with the document.
+   * The document metadata, stored as a services contents model.
    *
    * #### Notes
-   * The contents model will be null until the context is populated.
-   * It will have an  empty `contents` field.
+   * The contents model will be `null` until the context is populated.
+   * It will not have a `content` field.
    */
-  get contentsModel(): Contents.IModel | null {
-    return this._contentsModel;
+  get contentsModel(): Omit<Contents.IModel, 'content'> | null {
+    return this._contentsModel ? { ...this._contentsModel } : null;
   }
 
   /**
@@ -174,11 +199,11 @@ export class Context<T extends DocumentRegistry.IModel>
       return;
     }
     this._isDisposed = true;
-    this.session.dispose();
-    if (this._modelDB) {
-      this._modelDB.dispose();
-    }
+    this.sessionContext.dispose();
     this._model.dispose();
+    // Ensure we dispose the `sharedModel` as it may have been generated in the context
+    // through the shared model factory.
+    this._model.sharedModel.dispose();
     this._disposed.emit(void 0);
     Signal.clearData(this);
   }
@@ -198,6 +223,13 @@ export class Context<T extends DocumentRegistry.IModel>
   }
 
   /**
+   * Whether the document can be saved via the Contents API.
+   */
+  protected get canSave(): boolean {
+    return !!(this._contentsModel?.writable && !this._model.collaborative);
+  }
+
+  /**
    * The url resolver for the context.
    */
   readonly urlResolver: IRenderMime.IResolver;
@@ -209,78 +241,79 @@ export class Context<T extends DocumentRegistry.IModel>
    *
    * @returns a promise that resolves upon initialization.
    */
-  initialize(isNew: boolean): Promise<void> {
+  async initialize(isNew: boolean) {
     if (isNew) {
-      this._model.initialize();
-      return this._save();
-    }
-    if (this._modelDB) {
-      return this._modelDB.connected.then(() => {
-        if (this._modelDB.isPrepopulated) {
-          this._model.initialize();
-          void this._save();
-          return void 0;
-        } else {
-          return this._revert(true);
-        }
-      });
+      await this._save();
     } else {
-      return this._revert(true);
+      await this._revert();
     }
+    this.model.sharedModel.clearUndoHistory();
+  }
+
+  /**
+   * Rename the document.
+   *
+   * @param newName - the new name for the document.
+   */
+  rename(newName: string): Promise<void> {
+    return this.ready.then(() => {
+      return this._manager.ready.then(() => {
+        return this._rename(newName);
+      });
+    });
   }
 
   /**
    * Save the document contents to disk.
    */
-  save(): Promise<void> {
-    return this.ready.then(() => {
-      return this._save();
-    });
+  async save(): Promise<void> {
+    await this.ready;
+    await this._save();
   }
 
   /**
    * Save the document to a different path chosen by the user.
+   *
+   * It will be rejected if the user abort providing a new path.
    */
-  saveAs(): Promise<void> {
-    return this.ready
-      .then(() => {
-        return Private.getSavePath(this._path);
-      })
-      .then(newPath => {
-        if (this.isDisposed || !newPath) {
-          return;
-        }
-        if (newPath === this._path) {
-          return this.save();
-        }
-        // Make sure the path does not exist.
-        return this._manager.ready
-          .then(() => {
-            return this._manager.contents.get(newPath);
-          })
-          .then(() => {
-            return this._maybeOverWrite(newPath);
-          })
-          .catch(err => {
-            if (!err.response || err.response.status !== 404) {
-              throw err;
-            }
-            return this._finishSaveAs(newPath);
-          });
-      });
+  async saveAs(): Promise<void> {
+    await this.ready;
+    const localPath = this._manager.contents.localPath(this.path);
+    const newLocalPath = await Private.getSavePath(localPath);
+
+    if (this.isDisposed || !newLocalPath) {
+      return;
+    }
+
+    const drive = this._manager.contents.driveName(this.path);
+    const newPath = drive == '' ? newLocalPath : `${drive}:${newLocalPath}`;
+
+    if (newPath === this._path) {
+      return this.save();
+    }
+
+    // Make sure the path does not exist.
+    try {
+      await this._manager.ready;
+      await this._manager.contents.get(newPath);
+      await this._maybeOverWrite(newPath);
+    } catch (err) {
+      if (!err.response || err.response.status !== 404) {
+        throw err;
+      }
+      await this._finishSaveAs(newPath);
+    }
   }
 
   /**
    * Download a file.
-   *
-   * @param path - The path of the file to be downloaded.
    *
    * @returns A promise which resolves when the file has begun
    *   downloading.
    */
   async download(): Promise<void> {
     const url = await this._manager.contents.getDownloadUrl(this._path);
-    let element = document.createElement('a');
+    const element = document.createElement('a');
     element.href = url;
     element.download = '';
     document.body.appendChild(element);
@@ -292,17 +325,16 @@ export class Context<T extends DocumentRegistry.IModel>
   /**
    * Revert the document contents to disk contents.
    */
-  revert(): Promise<void> {
-    return this.ready.then(() => {
-      return this._revert();
-    });
+  async revert(): Promise<void> {
+    await this.ready;
+    await this._revert();
   }
 
   /**
    * Create a checkpoint for the file.
    */
   createCheckpoint(): Promise<Contents.ICheckpointModel> {
-    let contents = this._manager.contents;
+    const contents = this._manager.contents;
     return this._manager.ready.then(() => {
       return contents.createCheckpoint(this._path);
     });
@@ -312,7 +344,7 @@ export class Context<T extends DocumentRegistry.IModel>
    * Delete a checkpoint for the file.
    */
   deleteCheckpoint(checkpointId: string): Promise<void> {
-    let contents = this._manager.contents;
+    const contents = this._manager.contents;
     return this._manager.ready.then(() => {
       return contents.deleteCheckpoint(this._path, checkpointId);
     });
@@ -322,8 +354,8 @@ export class Context<T extends DocumentRegistry.IModel>
    * Restore the file to a known checkpoint state.
    */
   restoreCheckpoint(checkpointId?: string): Promise<void> {
-    let contents = this._manager.contents;
-    let path = this._path;
+    const contents = this._manager.contents;
+    const path = this._path;
     return this._manager.ready.then(() => {
       if (checkpointId) {
         return contents.restoreCheckpoint(path, checkpointId);
@@ -342,7 +374,7 @@ export class Context<T extends DocumentRegistry.IModel>
    * List available checkpoints for a file.
    */
   listCheckpoints(): Promise<Contents.ICheckpointModel[]> {
-    let contents = this._manager.contents;
+    const contents = this._manager.contents;
     return this._manager.ready.then(() => {
       return contents.listCheckpoints(this._path);
     });
@@ -365,7 +397,7 @@ export class Context<T extends DocumentRegistry.IModel>
     widget: Widget,
     options: DocumentRegistry.IOpenOptions = {}
   ): IDisposable {
-    let opener = this._opener;
+    const opener = this._opener;
     if (opener) {
       opener(widget, options);
     }
@@ -381,13 +413,24 @@ export class Context<T extends DocumentRegistry.IModel>
     sender: Contents.IManager,
     change: Contents.IChangedArgs
   ): void {
+    if (change.type === 'save' && this._model.collaborative) {
+      // Update the contents model with the new values provided on save.
+      // This is needed for save operations performed on the server-side
+      // by the collaborative drive which needs to update the `hash`
+      // of the content when it changes on the backend.
+      this._updateContentsModel({
+        ...this._contentsModel,
+        ...change.newValue
+      } as Contents.IModel);
+      return;
+    }
     if (change.type !== 'rename') {
       return;
     }
     let oldPath = change.oldValue && change.oldValue.path;
     let newPath = change.newValue && change.newValue.path;
 
-    if (newPath && this._path.indexOf(oldPath) === 0) {
+    if (newPath && this._path.indexOf(oldPath || '') === 0) {
       let changeModel = change.newValue;
       // When folder name changed, `oldPath` is `foo`, `newPath` is `bar` and `this._path` is `foo/test`,
       // we should update `foo/test` to `bar/test` as well
@@ -398,155 +441,195 @@ export class Context<T extends DocumentRegistry.IModel>
 
         // Update client file model from folder change
         changeModel = {
-          last_modified: change.newValue.created,
+          last_modified: change.newValue?.created,
           path: newPath
         };
       }
-      this._path = newPath;
-      void this.session.setPath(newPath);
-      const updateModel = {
+      this._updateContentsModel({
         ...this._contentsModel,
         ...changeModel
-      };
-      const localPath = this._manager.contents.localPath(newPath);
-      void this.session.setName(PathExt.basename(localPath));
-      this._updateContentsModel(updateModel as Contents.IModel);
-      this._pathChanged.emit(this._path);
+      } as Contents.IModel);
+      this._updatePath(newPath);
     }
   }
 
   /**
    * Handle a change to a session property.
    */
-  private _onSessionChanged(sender: IClientSession, type: string): void {
+  private _onSessionChanged(sender: ISessionContext, type: string): void {
     if (type !== 'path') {
       return;
     }
-    let path = this.session.path;
-    if (path !== this._path) {
-      this._path = path;
-      this._pathChanged.emit(path);
+
+    // The session uses local paths.
+    // We need to convert it to a global path.
+    const driveName = this._manager.contents.driveName(this.path);
+    let newPath = this.sessionContext.session!.path;
+    if (driveName) {
+      newPath = `${driveName}:${newPath}`;
     }
+    this._updatePath(newPath);
   }
 
   /**
    * Update our contents model, without the content.
    */
-  private _updateContentsModel(model: Contents.IModel): void {
-    let newModel: Contents.IModel = {
+  private _updateContentsModel(
+    model: Contents.IModel | Omit<Contents.IModel, 'content'>
+  ): void {
+    const writable = model.writable && !this._model.collaborative;
+    const newModel: Omit<Contents.IModel, 'content'> = {
       path: model.path,
       name: model.name,
       type: model.type,
-      content: undefined,
-      writable: model.writable,
+      writable,
       created: model.created,
       last_modified: model.last_modified,
       mimetype: model.mimetype,
-      format: model.format
+      format: model.format,
+      hash: model.hash,
+      hash_algorithm: model.hash_algorithm
     };
-    let mod = this._contentsModel ? this._contentsModel.last_modified : null;
+    const mod = this._contentsModel?.last_modified ?? null;
+    const hash = this._contentsModel?.hash ?? null;
     this._contentsModel = newModel;
-    if (!mod || newModel.last_modified !== mod) {
+    if (
+      // If neither modification date nor hash available, assume the file has changed
+      (!mod && !hash) ||
+      // Compare last_modified if no hash
+      (!hash && newModel.last_modified !== mod) ||
+      // Compare hash if available
+      (hash && newModel.hash !== hash)
+    ) {
       this._fileChanged.emit(newModel);
     }
+  }
+
+  private _updatePath(newPath: string): void {
+    if (this._path === newPath) {
+      return;
+    }
+
+    this._path = newPath;
+    const localPath = this._manager.contents.localPath(newPath);
+    const name = PathExt.basename(localPath);
+    if (this.sessionContext.session?.path !== localPath) {
+      void this.sessionContext.session?.setPath(localPath);
+    }
+    if (this.sessionContext.session?.name !== name) {
+      void this.sessionContext.session?.setName(name);
+    }
+    if ((this.urlResolver as RenderMimeRegistry.UrlResolver).path !== newPath) {
+      (this.urlResolver as RenderMimeRegistry.UrlResolver).path = newPath;
+    }
+    if (
+      this._contentsModel &&
+      (this._contentsModel.path !== newPath ||
+        this._contentsModel.name !== name)
+    ) {
+      const contentsModel = {
+        ...this._contentsModel,
+        name: name,
+        path: newPath
+      };
+      this._updateContentsModel(contentsModel);
+    }
+    this._pathChanged.emit(newPath);
   }
 
   /**
    * Handle an initial population.
    */
-  private _populate(): Promise<void> {
+  private async _populate(): Promise<void> {
     this._isPopulated = true;
     this._isReady = true;
     this._populatedPromise.resolve(void 0);
 
     // Add a checkpoint if none exists and the file is writable.
-    return this._maybeCheckpoint(false).then(() => {
-      if (this.isDisposed) {
-        return;
+    await this._maybeCheckpoint(false);
+    if (this.isDisposed) {
+      return;
+    }
+    // Update the kernel preference.
+    const name =
+      this._model.defaultKernelName ||
+      this.sessionContext.kernelPreference.name;
+    this.sessionContext.kernelPreference = {
+      ...this.sessionContext.kernelPreference,
+      name,
+      language: this._model.defaultKernelLanguage
+    };
+    // Note: we don't wait on the session to initialize
+    // so that the user can be shown the content before
+    // any kernel has started.
+    void this.sessionContext.initialize().then(shouldSelect => {
+      if (shouldSelect) {
+        void this._dialogs.selectKernel(this.sessionContext);
       }
-      // Update the kernel preference.
-      let name =
-        this._model.defaultKernelName || this.session.kernelPreference.name;
-      this.session.kernelPreference = {
-        ...this.session.kernelPreference,
-        name,
-        language: this._model.defaultKernelLanguage
-      };
-      // Note: we don't wait on the session to initialize
-      // so that the user can be shown the content before
-      // any kernel has started.
-      void this.session.initialize();
     });
+  }
+
+  /**
+   * Rename the document.
+   *
+   * @param newName - the new name for the document.
+   */
+  private async _rename(newName: string): Promise<void> {
+    const splitPath = this.localPath.split('/');
+    splitPath[splitPath.length - 1] = newName;
+    let newPath = PathExt.join(...splitPath);
+    const driveName = this._manager.contents.driveName(this.path);
+    if (driveName) {
+      newPath = `${driveName}:${newPath}`;
+    }
+
+    // rename triggers a fileChanged which updates the contents model
+    await this._manager.contents.rename(this.path, newPath);
   }
 
   /**
    * Save the document contents to disk.
    */
-  private _save(): Promise<void> {
+  private async _save(): Promise<void> {
     this._saveState.emit('started');
-    let model = this._model;
-    let content: JSONValue;
-    if (this._factory.fileFormat === 'json') {
-      content = model.toJSON();
-    } else {
-      content = model.toString();
-      if (this._useCRLF) {
-        content = content.replace(/\n/g, '\r\n');
+    const options = this._createSaveOptions();
+
+    try {
+      await this._manager.ready;
+      const value = await this._maybeSave(options);
+      if (this.isDisposed) {
+        return;
       }
-    }
 
-    let options = {
-      type: this._factory.contentType,
-      format: this._factory.fileFormat,
-      content
-    };
+      this._model.dirty = false;
+      this._updateContentsModel(value);
 
-    return this._manager.ready
-      .then(() => {
-        if (!model.modelDB.isCollaborative) {
-          return this._maybeSave(options);
-        }
-        return this._manager.contents.save(this._path, options);
-      })
-      .then(value => {
-        if (this.isDisposed) {
-          return;
-        }
+      if (!this._isPopulated) {
+        await this._populate();
+      }
 
-        model.dirty = false;
-        this._updateContentsModel(value);
-
-        if (!this._isPopulated) {
-          return this._populate();
-        }
-      })
-      .catch(err => {
-        // If the save has been canceled by the user,
-        // throw the error so that whoever called save()
-        // can decide what to do.
-        if (err.message === 'Cancel') {
-          throw err;
-        }
-
-        // Otherwise show an error message and throw the error.
-        const localPath = this._manager.contents.localPath(this._path);
-        const name = PathExt.basename(localPath);
-        void this._handleError(err, `File Save Error for ${name}`);
+      // Emit completion.
+      this._saveState.emit('completed');
+    } catch (err) {
+      // If the save has been canceled by the user, throw the error
+      // so that whoever called save() can decide what to do.
+      const { name } = err;
+      if (name === 'ModalCancelError' || name === 'ModalDuplicateError') {
         throw err;
-      })
-      .then(
-        value => {
-          // Capture all success paths and emit completion.
-          this._saveState.emit('completed');
-          return value;
-        },
-        err => {
-          // Capture all error paths and emit failure.
-          this._saveState.emit('failed');
-          throw err;
-        }
-      )
-      .catch();
+      }
+
+      // Otherwise show an error message and throw the error.
+      const localPath = this._manager.contents.localPath(this._path);
+      const file = PathExt.basename(localPath);
+      void this._handleError(
+        err,
+        this._trans.__('File Save Error for %1', file)
+      );
+
+      // Emit failure.
+      this._saveState.emit('failed');
+      throw err;
+    }
   }
 
   /**
@@ -556,13 +639,16 @@ export class Context<T extends DocumentRegistry.IModel>
    * deserializing the content.
    */
   private _revert(initializeModel: boolean = false): Promise<void> {
-    let opts: Contents.IFetchOptions = {
-      format: this._factory.fileFormat,
+    const opts: Contents.IFetchOptions = {
       type: this._factory.contentType,
-      content: true
+      content: this._factory.fileFormat !== null,
+      hash: this._factory.fileFormat !== null,
+      ...(this._factory.fileFormat !== null
+        ? { format: this._factory.fileFormat }
+        : {})
     };
-    let path = this._path;
-    let model = this._model;
+    const path = this._path;
+    const model = this._model;
     return this._manager.ready
       .then(() => {
         return this._manager.contents.get(path, opts);
@@ -571,29 +657,28 @@ export class Context<T extends DocumentRegistry.IModel>
         if (this.isDisposed) {
           return;
         }
-        let dirty = false;
-        if (contents.format === 'json') {
-          model.fromJSON(contents.content);
-          if (initializeModel) {
-            model.initialize();
-          }
-        } else {
-          let content = contents.content;
-          // Convert line endings if necessary, marking the file
-          // as dirty.
-          if (content.indexOf('\r') !== -1) {
-            this._useCRLF = true;
-            content = content.replace(/\r\n/g, '\n');
+        if (contents.content) {
+          if (contents.format === 'json') {
+            model.fromJSON(contents.content);
           } else {
-            this._useCRLF = false;
-          }
-          model.fromString(content);
-          if (initializeModel) {
-            model.initialize();
+            let content = contents.content;
+            // Convert line endings if necessary, marking the file
+            // as dirty.
+            if (content.indexOf('\r\n') !== -1) {
+              this._lineEnding = '\r\n';
+              content = content.replace(/\r\n/g, '\n');
+            } else if (content.indexOf('\r') !== -1) {
+              this._lineEnding = '\r';
+              content = content.replace(/\r/g, '\n');
+            } else {
+              this._lineEnding = null;
+            }
+            model.fromString(content);
           }
         }
+
         this._updateContentsModel(contents);
-        model.dirty = dirty;
+        model.dirty = false;
         if (!this._isPopulated) {
           return this._populate();
         }
@@ -601,11 +686,10 @@ export class Context<T extends DocumentRegistry.IModel>
       .catch(async err => {
         const localPath = this._manager.contents.localPath(this._path);
         const name = PathExt.basename(localPath);
-        const response = await err.response.json();
-        if (err.message === 'Invalid response: 400 bad format') {
-          err = new Error(response.message);
-        }
-        void this._handleError(err, `File Load Error for ${name}`);
+        void this._handleError(
+          err,
+          this._trans.__('File Load Error for %1', name)
+        );
         throw err;
       });
   }
@@ -616,30 +700,80 @@ export class Context<T extends DocumentRegistry.IModel>
   private _maybeSave(
     options: Partial<Contents.IModel>
   ): Promise<Contents.IModel> {
-    let path = this._path;
+    const path = this._path;
     // Make sure the file has not changed on disk.
-    let promise = this._manager.contents.get(path, { content: false });
+    const promise = this._manager.contents.get(path, {
+      content: false,
+      hash: true
+    });
     return promise.then(
       model => {
         if (this.isDisposed) {
           return Promise.reject(new Error('Disposed'));
         }
+        // Since jupyter server may provide hash in model, we compare hash first
+        const hashAvailable =
+          this.contentsModel?.hash !== undefined &&
+          this.contentsModel?.hash !== null &&
+          model.hash !== undefined &&
+          model.hash !== null;
+        const hClient = this.contentsModel?.hash;
+        const hDisk = model.hash;
+        if (hashAvailable && hClient !== hDisk) {
+          console.warn(`Different hash found for ${this.path}`);
+          return this._raiseConflict(model, options);
+        }
+
+        // When hash is not provided, we compare last_modified
         // We want to check last_modified (disk) > last_modified (client)
         // (our last save)
-        // In some cases the filesystem reports an inconsistent time,
-        // so we allow 0.5 seconds difference before complaining.
-        let modified = this.contentsModel && this.contentsModel.last_modified;
-        let tClient = new Date(modified);
-        let tDisk = new Date(model.last_modified);
-        if (modified && tDisk.getTime() - tClient.getTime() > 500) {
-          // 500 ms
-          return this._timeConflict(tClient, model, options);
+        // In some cases the filesystem reports an inconsistent time, so we allow buffer when comparing.
+        const lastModifiedCheckMargin = this._lastModifiedCheckMargin;
+        const modified = this.contentsModel?.last_modified;
+        const tClient = modified ? new Date(modified) : new Date();
+        const tDisk = new Date(model.last_modified);
+        if (
+          !hashAvailable &&
+          modified &&
+          tDisk.getTime() - tClient.getTime() > lastModifiedCheckMargin
+        ) {
+          console.warn(
+            `Last saving performed ${tClient} ` +
+              `while the current file seems to have been saved ` +
+              `${tDisk}`
+          );
+          return this._raiseConflict(model, options);
         }
-        return this._manager.contents.save(path, options);
+
+        return this._manager.contents
+          .save(path, options)
+          .then(async contentsModel => {
+            const model = await this._manager.contents.get(path, {
+              content: false,
+              hash: true
+            });
+            return {
+              ...contentsModel,
+              hash: model.hash,
+              hash_algorithm: model.hash_algorithm
+            } as Contents.IModel;
+          });
       },
       err => {
         if (err.response && err.response.status === 404) {
-          return this._manager.contents.save(path, options);
+          return this._manager.contents
+            .save(path, options)
+            .then(async contentsModel => {
+              const model = await this._manager.contents.get(path, {
+                content: false,
+                hash: true
+              });
+              return {
+                ...contentsModel,
+                hash: model.hash,
+                hash_algorithm: model.hash_algorithm
+              } as Contents.IModel;
+            });
         }
         throw err;
       }
@@ -653,21 +787,7 @@ export class Context<T extends DocumentRegistry.IModel>
     err: Error | ServerConnection.ResponseError,
     title: string
   ): Promise<void> {
-    // Check for a more specific error message.
-    let error = { message: '' };
-    if (err instanceof ServerConnection.ResponseError) {
-      const text = await err.response.text();
-      let body = '';
-      try {
-        body = JSON.parse(text).message;
-      } catch (e) {
-        body = text;
-      }
-      error.message = body || err.message;
-    } else {
-      error.message = err.message;
-    }
-    await showErrorMessage(title, error);
+    await showErrorMessage(title, err);
     return;
   }
 
@@ -675,20 +795,16 @@ export class Context<T extends DocumentRegistry.IModel>
    * Add a checkpoint the file is writable.
    */
   private _maybeCheckpoint(force: boolean): Promise<void> {
-    let writable = this._contentsModel && this._contentsModel.writable;
     let promise = Promise.resolve(void 0);
-    if (!writable) {
+    if (!this.canSave) {
       return promise;
     }
     if (force) {
-      promise = this.createCheckpoint();
+      promise = this.createCheckpoint().then(/* no-op */);
     } else {
       promise = this.listCheckpoints().then(checkpoints => {
-        writable = this._contentsModel && this._contentsModel.writable;
-        if (!this.isDisposed && !checkpoints.length && writable) {
-          return this.createCheckpoint().then(() => {
-            /* no-op */
-          });
+        if (!this.isDisposed && !checkpoints.length && this.canSave) {
+          return this.createCheckpoint().then(/* no-op */);
         }
       });
     }
@@ -699,45 +815,53 @@ export class Context<T extends DocumentRegistry.IModel>
       }
     });
   }
-
   /**
    * Handle a time conflict.
    */
-  private _timeConflict(
-    tClient: Date,
+  private _raiseConflict(
     model: Contents.IModel,
     options: Partial<Contents.IModel>
   ): Promise<Contents.IModel> {
-    let tDisk = new Date(model.last_modified);
-    console.warn(
-      `Last saving performed ${tClient} ` +
-        `while the current file seems to have been saved ` +
-        `${tDisk}`
+    if (this._conflictModalIsOpen) {
+      const error = new Error('Modal is already displayed');
+      error.name = 'ModalDuplicateError';
+      return Promise.reject(error);
+    }
+    const body = this._trans.__(
+      `"%1" has changed on disk since the last time it was opened or saved.
+Do you want to overwrite the file on disk with the version open here,
+or load the version on disk (revert)?`,
+      this.path
     );
-    let body =
-      `"${this.path}" has changed on disk since the last time it ` +
-      `was opened or saved. ` +
-      `Do you want to overwrite the file on disk with the version ` +
-      ` open here, or load the version on disk (revert)?`;
-    let revertBtn = Dialog.okButton({ label: 'Revert' });
-    let overwriteBtn = Dialog.warnButton({ label: 'Overwrite' });
+    const revertBtn = Dialog.okButton({
+      label: this._trans.__('Revert'),
+      actions: ['revert']
+    });
+    const overwriteBtn = Dialog.warnButton({
+      label: this._trans.__('Overwrite'),
+      actions: ['overwrite']
+    });
+    this._conflictModalIsOpen = true;
     return showDialog({
-      title: 'File Changed',
+      title: this._trans.__('File Changed'),
       body,
       buttons: [Dialog.cancelButton(), revertBtn, overwriteBtn]
     }).then(result => {
+      this._conflictModalIsOpen = false;
       if (this.isDisposed) {
         return Promise.reject(new Error('Disposed'));
       }
-      if (result.button.label === 'Overwrite') {
+      if (result.button.actions.includes('overwrite')) {
         return this._manager.contents.save(this._path, options);
       }
-      if (result.button.label === 'Revert') {
+      if (result.button.actions.includes('revert')) {
         return this.revert().then(() => {
           return model;
         });
       }
-      return Promise.reject(new Error('Cancel')); // Otherwise cancel the save.
+      const error = new Error('Cancel');
+      error.name = 'ModalCancelError';
+      return Promise.reject(error); // Otherwise cancel the save.
     });
   }
 
@@ -745,17 +869,24 @@ export class Context<T extends DocumentRegistry.IModel>
    * Handle a time conflict.
    */
   private _maybeOverWrite(path: string): Promise<void> {
-    let body = `"${path}" already exists. Do you want to replace it?`;
-    let overwriteBtn = Dialog.warnButton({ label: 'Overwrite' });
+    const body = this._trans.__(
+      '"%1" already exists. Do you want to replace it?',
+      path
+    );
+    const overwriteBtn = Dialog.warnButton({
+      label: this._trans.__('Overwrite'),
+      accept: true
+    });
     return showDialog({
-      title: 'File Overwrite?',
+      title: this._trans.__('File Overwrite?'),
       body,
       buttons: [Dialog.cancelButton(), overwriteBtn]
     }).then(result => {
       if (this.isDisposed) {
         return Promise.reject(new Error('Disposed'));
       }
-      if (result.button.label === 'Overwrite') {
+
+      if (result.button.accept) {
         return this._manager.contents.delete(path).then(() => {
           return this._finishSaveAs(path);
         });
@@ -766,40 +897,88 @@ export class Context<T extends DocumentRegistry.IModel>
   /**
    * Finish a saveAs operation given a new path.
    */
-  private _finishSaveAs(newPath: string): Promise<void> {
-    this._path = newPath;
-    return this.session
-      .setPath(newPath)
-      .then(() => {
-        void this.session.setName(newPath.split('/').pop()!);
-        return this.save();
-      })
-      .then(() => {
-        this._pathChanged.emit(this._path);
-        return this._maybeCheckpoint(true);
-      });
+  private async _finishSaveAs(newPath: string): Promise<void> {
+    this._saveState.emit('started');
+    try {
+      await this._manager.ready;
+      const options = this._createSaveOptions();
+      await this._manager.contents.save(newPath, options);
+      await this._maybeCheckpoint(true);
+
+      // Emit completion.
+      this._saveState.emit('completed');
+    } catch (err) {
+      // If the save has been canceled by the user,
+      // throw the error so that whoever called save()
+      // can decide what to do.
+      if (
+        err.message === 'Cancel' ||
+        err.message === 'Modal is already displayed'
+      ) {
+        throw err;
+      }
+
+      // Otherwise show an error message and throw the error.
+      const localPath = this._manager.contents.localPath(this._path);
+      const name = PathExt.basename(localPath);
+      void this._handleError(
+        err,
+        this._trans.__('File Save Error for %1', name)
+      );
+
+      // Emit failure.
+      this._saveState.emit('failed');
+      return;
+    }
   }
 
+  private _createSaveOptions(): Partial<Contents.IModel> {
+    let content: PartialJSONValue = null;
+    if (this._factory.fileFormat === 'json') {
+      content = this._model.toJSON();
+    } else {
+      content = this._model.toString();
+      if (this._lineEnding) {
+        content = content.replace(/\n/g, this._lineEnding);
+      }
+    }
+
+    return {
+      type: this._factory.contentType,
+      format: this._factory.fileFormat,
+      content
+    };
+  }
+
+  protected translator: ITranslator;
+
+  private _isReady = false;
+  private _isDisposed = false;
+  private _isPopulated = false;
+  private _trans: TranslationBundle;
   private _manager: ServiceManager.IManager;
   private _opener: (
     widget: Widget,
     options?: DocumentRegistry.IOpenOptions
   ) => void;
+
   private _model: T;
-  private _modelDB: IModelDB;
   private _path = '';
-  private _useCRLF = false;
+  private _lineEnding: string | null = null;
   private _factory: DocumentRegistry.IModelFactory<T>;
-  private _contentsModel: Contents.IModel | null = null;
+  private _contentsModel: Omit<Contents.IModel, 'content'> | null = null;
+
   private _readyPromise: Promise<void>;
   private _populatedPromise = new PromiseDelegate<void>();
-  private _isPopulated = false;
-  private _isReady = false;
-  private _isDisposed = false;
   private _pathChanged = new Signal<this, string>(this);
-  private _fileChanged = new Signal<this, Contents.IModel>(this);
+  private _fileChanged = new Signal<this, Omit<Contents.IModel, 'content'>>(
+    this
+  );
   private _saveState = new Signal<this, DocumentRegistry.SaveState>(this);
   private _disposed = new Signal<this, void>(this);
+  private _dialogs: ISessionContext.IDialogs;
+  private _lastModifiedCheckMargin = 500;
+  private _conflictModalIsOpen = false;
 }
 
 /**
@@ -828,12 +1007,7 @@ export namespace Context {
     /**
      * The kernel preference associated with the context.
      */
-    kernelPreference?: IClientSession.IKernelPreference;
-
-    /**
-     * An IModelDB factory method which may be used for the document.
-     */
-    modelDBFactory?: ModelDB.IFactory;
+    kernelPreference?: ISessionContext.IKernelPreference;
 
     /**
      * An optional callback for opening sibling widgets.
@@ -844,6 +1018,21 @@ export namespace Context {
      * A function to call when the kernel is busy.
      */
     setBusy?: () => IDisposable;
+
+    /**
+     * The dialogs used for the session context.
+     */
+    sessionDialogs?: ISessionContext.IDialogs;
+
+    /**
+     * The application language translator.
+     */
+    translator?: ITranslator;
+
+    /**
+     * Max acceptable difference, in milliseconds, between last modified timestamps on disk and client
+     */
+    lastModifiedCheckMargin?: number;
   }
 }
 
@@ -854,15 +1043,21 @@ namespace Private {
   /**
    * Get a new file path from the user.
    */
-  export function getSavePath(path: string): Promise<string | undefined> {
-    let saveBtn = Dialog.okButton({ label: 'Save' });
+  export function getSavePath(
+    path: string,
+    translator?: ITranslator
+  ): Promise<string | undefined> {
+    translator = translator || nullTranslator;
+    const trans = translator.load('jupyterlab');
+
+    const saveBtn = Dialog.okButton({ label: trans.__('Save'), accept: true });
     return showDialog({
-      title: 'Save File As..',
+      title: trans.__('Save File As…'),
       body: new SaveWidget(path),
       buttons: [Dialog.cancelButton(), saveBtn]
     }).then(result => {
-      if (result.button.label === 'Save') {
-        return result.value;
+      if (result.button.accept) {
+        return result.value ?? undefined;
       }
       return;
     });
@@ -871,7 +1066,7 @@ namespace Private {
   /**
    * A no-op function.
    */
-  export function noOp() {
+  export function noOp(): void {
     /* no-op */
   }
 
@@ -898,7 +1093,7 @@ namespace Private {
    * Create the node for a save widget.
    */
   function createSaveNode(path: string): HTMLElement {
-    let input = document.createElement('input');
+    const input = document.createElement('input');
     input.value = path;
     return input;
   }

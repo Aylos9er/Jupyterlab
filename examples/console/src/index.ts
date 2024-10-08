@@ -2,41 +2,58 @@
 // Distributed under the terms of the Modified BSD License.
 
 import { PageConfig, URLExt } from '@jupyterlab/coreutils';
-// @ts-ignore
-__webpack_public_path__ = URLExt.join(PageConfig.getBaseUrl(), 'example/');
+(window as any).__webpack_public_path__ = URLExt.join(
+  PageConfig.getBaseUrl(),
+  'example/'
+);
 
-import '@jupyterlab/application/style/index.css';
-import '@jupyterlab/console/style/index.css';
-import '@jupyterlab/theme-light-extension/style/index.css';
-import '../index.css';
+// Import style through JS file to deduplicate them.
+import './style';
 
-import { CommandRegistry } from '@phosphor/commands';
+import { CommandRegistry } from '@lumino/commands';
 
-import { CommandPalette, SplitPanel, Widget } from '@phosphor/widgets';
+import { CommandPalette, SplitPanel, Widget } from '@lumino/widgets';
 
 import { ServiceManager } from '@jupyterlab/services';
 
-import { editorServices } from '@jupyterlab/codemirror';
+import {
+  CodeMirrorEditorFactory,
+  CodeMirrorMimeTypeService,
+  EditorExtensionRegistry,
+  EditorLanguageRegistry,
+  EditorThemeRegistry,
+  ybinding
+} from '@jupyterlab/codemirror';
 
 import { ConsolePanel } from '@jupyterlab/console';
 
 import {
-  RenderMimeRegistry,
-  standardRendererFactories as initialFactories
+  standardRendererFactories as initialFactories,
+  RenderMimeRegistry
 } from '@jupyterlab/rendermime';
 
-let TITLE = 'Console';
+import {
+  ITranslator,
+  nullTranslator,
+  TranslationManager
+} from '@jupyterlab/translation';
 
-function main(): void {
-  console.log('in main');
+import { IYText } from '@jupyter/ydoc';
+
+async function main(): Promise<any> {
+  const translator = new TranslationManager();
+  await translator.fetch('en');
+  const trans = translator.load('jupyterlab');
+
+  console.debug(trans.__('in main'));
   let path = '';
-  let query: { [key: string]: string } = Object.create(null);
+  const query: { [key: string]: string } = Object.create(null);
 
   window.location.search
     .substr(1)
     .split('&')
     .forEach(item => {
-      let pair = item.split('=');
+      const pair = item.split('=');
       if (pair[0]) {
         query[pair[0]] = pair[1];
       }
@@ -46,41 +63,89 @@ function main(): void {
     path = query['path'];
   }
 
-  let manager = new ServiceManager();
+  const manager = new ServiceManager();
   void manager.ready.then(() => {
-    startApp(path, manager);
+    startApp(path, manager, translator);
   });
 }
 
 /**
  * Start the application.
  */
-function startApp(path: string, manager: ServiceManager.IManager) {
-  console.log('starting app');
+function startApp(
+  path: string,
+  manager: ServiceManager.IManager,
+  translator?: ITranslator
+) {
+  translator = translator || nullTranslator;
+  const trans = translator.load('jupyterlab');
+
+  console.debug(trans.__('starting app'));
   // Initialize the command registry with the key bindings.
-  let commands = new CommandRegistry();
+  const commands = new CommandRegistry();
 
   // Setup the keydown listener for the document.
   document.addEventListener('keydown', event => {
     commands.processKeydownEvent(event);
   });
 
-  let rendermime = new RenderMimeRegistry({ initialFactories });
+  const rendermime = new RenderMimeRegistry({ initialFactories });
 
-  let editorFactory = editorServices.factoryService.newInlineEditor;
-  let contentFactory = new ConsolePanel.ContentFactory({ editorFactory });
-  let consolePanel = new ConsolePanel({
+  const editorExtensions = () => {
+    const themes = new EditorThemeRegistry();
+    EditorThemeRegistry.getDefaultThemes().forEach(theme => {
+      themes.addTheme(theme);
+    });
+    const registry = new EditorExtensionRegistry();
+
+    EditorExtensionRegistry.getDefaultExtensions({ themes }).forEach(
+      extensionFactory => {
+        registry.addExtension(extensionFactory);
+      }
+    );
+    registry.addExtension({
+      name: 'shared-model-binding',
+      factory: options => {
+        const sharedModel = options.model.sharedModel as IYText;
+        return EditorExtensionRegistry.createImmutableExtension(
+          ybinding({
+            ytext: sharedModel.ysource,
+            undoManager: sharedModel.undoManager ?? undefined
+          })
+        );
+      }
+    });
+    return registry;
+  };
+
+  const languages = new EditorLanguageRegistry();
+  EditorLanguageRegistry.getDefaultLanguages()
+    .filter(language =>
+      ['ipython', 'julia', 'python'].includes(language.name.toLowerCase())
+    )
+    .forEach(language => {
+      languages.addLanguage(language);
+    });
+  const factoryService = new CodeMirrorEditorFactory({
+    extensions: editorExtensions(),
+    languages
+  });
+  const mimeTypeService = new CodeMirrorMimeTypeService(languages);
+  const editorFactory = factoryService.newInlineEditor;
+  const contentFactory = new ConsolePanel.ContentFactory({ editorFactory });
+
+  const consolePanel = new ConsolePanel({
     rendermime,
     manager,
     path,
     contentFactory,
-    mimeTypeService: editorServices.mimeTypeService
+    mimeTypeService
   });
-  consolePanel.title.label = TITLE;
+  consolePanel.title.label = trans.__('Console');
 
-  let palette = new CommandPalette({ commands });
+  const palette = new CommandPalette({ commands });
 
-  let panel = new SplitPanel();
+  const panel = new SplitPanel();
   panel.id = 'main';
   panel.orientation = 'horizontal';
   panel.spacing = 0;
@@ -88,6 +153,9 @@ function startApp(path: string, manager: ServiceManager.IManager) {
   SplitPanel.setStretch(consolePanel, 1);
   panel.addWidget(palette);
   panel.addWidget(consolePanel);
+
+  // Ensure Jupyter styling
+  panel.addClass('jp-ThemedContainer');
 
   // Attach the panel to the DOM.
   Widget.attach(panel, document.body);
@@ -97,14 +165,14 @@ function startApp(path: string, manager: ServiceManager.IManager) {
     panel.update();
   });
 
-  let selector = '.jp-ConsolePanel';
-  let category = 'Console';
+  const selector = '.jp-ConsolePanel';
+  const category = trans.__('Console');
   let command: string;
 
   // Add the commands.
   command = 'console:clear';
   commands.addCommand(command, {
-    label: 'Clear',
+    label: trans.__('Clear'),
     execute: () => {
       consolePanel.console.clear();
     }
@@ -113,7 +181,7 @@ function startApp(path: string, manager: ServiceManager.IManager) {
 
   command = 'console:execute';
   commands.addCommand(command, {
-    label: 'Execute Prompt',
+    label: trans.__('Execute Prompt'),
     execute: () => {
       return consolePanel.console.execute();
     }
@@ -123,7 +191,7 @@ function startApp(path: string, manager: ServiceManager.IManager) {
 
   command = 'console:execute-forced';
   commands.addCommand(command, {
-    label: 'Execute Cell (forced)',
+    label: trans.__('Execute Cell (forced)'),
     execute: () => {
       return consolePanel.console.execute(true);
     }
@@ -133,7 +201,7 @@ function startApp(path: string, manager: ServiceManager.IManager) {
 
   command = 'console:linebreak';
   commands.addCommand(command, {
-    label: 'Insert Line Break',
+    label: trans.__('Insert Line Break'),
     execute: () => {
       consolePanel.console.insertLinebreak();
     }
@@ -141,7 +209,7 @@ function startApp(path: string, manager: ServiceManager.IManager) {
   palette.addItem({ command, category });
   commands.addKeyBinding({ command, selector, keys: ['Ctrl Enter'] });
 
-  console.log('Example started!');
+  console.debug(trans.__('Example started!'));
 }
 
 window.addEventListener('load', main);

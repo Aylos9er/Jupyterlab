@@ -1,32 +1,18 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import {
-  ArrayExt,
-  each,
-  map,
-  find,
-  filter,
-  toArray
-} from '@phosphor/algorithm';
-
-import { DisposableSet, IDisposable } from '@phosphor/disposable';
-
-import { IMessageHandler, Message, MessageLoop } from '@phosphor/messaging';
-
-import { AttachedProperty } from '@phosphor/properties';
-
-import { ISignal, Signal } from '@phosphor/signaling';
-
-import { Widget } from '@phosphor/widgets';
-
-import { Time } from '@jupyterlab/coreutils';
-
-import { showDialog, Dialog } from '@jupyterlab/apputils';
-
+import { Dialog, showDialog } from '@jupyterlab/apputils';
+import { IChangedArgs, Time } from '@jupyterlab/coreutils';
 import { DocumentRegistry, IDocumentWidget } from '@jupyterlab/docregistry';
-
 import { Contents } from '@jupyterlab/services';
+import { ITranslator, nullTranslator } from '@jupyterlab/translation';
+import { ArrayExt, find } from '@lumino/algorithm';
+import { DisposableSet, IDisposable } from '@lumino/disposable';
+import { IMessageHandler, Message, MessageLoop } from '@lumino/messaging';
+import { AttachedProperty } from '@lumino/properties';
+import { ISignal, Signal } from '@lumino/signaling';
+import { Widget } from '@lumino/widgets';
+import { IRecentsManager } from './tokens';
 
 /**
  * The class name added to document widgets.
@@ -42,6 +28,8 @@ export class DocumentWidgetManager implements IDisposable {
    */
   constructor(options: DocumentWidgetManager.IOptions) {
     this._registry = options.registry;
+    this.translator = options.translator || nullTranslator;
+    this._recentsManager = options.recentsManager || null;
   }
 
   /**
@@ -49,6 +37,31 @@ export class DocumentWidgetManager implements IDisposable {
    */
   get activateRequested(): ISignal<this, string> {
     return this._activateRequested;
+  }
+
+  /**
+   * Whether to ask confirmation to close a tab or not.
+   */
+  get confirmClosingDocument(): boolean {
+    return this._confirmClosingTab;
+  }
+  set confirmClosingDocument(v: boolean) {
+    if (this._confirmClosingTab !== v) {
+      const oldValue = this._confirmClosingTab;
+      this._confirmClosingTab = v;
+      this._stateChanged.emit({
+        name: 'confirmClosingDocument',
+        oldValue,
+        newValue: v
+      });
+    }
+  }
+
+  /**
+   * Signal triggered when an attribute changes.
+   */
+  get stateChanged(): ISignal<DocumentWidgetManager, IChangedArgs<any>> {
+    return this._stateChanged;
   }
 
   /**
@@ -84,7 +97,7 @@ export class DocumentWidgetManager implements IDisposable {
     factory: DocumentRegistry.WidgetFactory,
     context: DocumentRegistry.Context
   ): IDocumentWidget {
-    let widget = factory.createNew(context);
+    const widget = factory.createNew(context);
     this._initializeWidget(widget, factory, context);
     return widget;
   }
@@ -102,10 +115,13 @@ export class DocumentWidgetManager implements IDisposable {
   ) {
     Private.factoryProperty.set(widget, factory);
     // Handle widget extensions.
-    let disposables = new DisposableSet();
-    each(this._registry.widgetExtensions(factory.name), extender => {
-      disposables.add(extender.createNew(widget, context));
-    });
+    const disposables = new DisposableSet();
+    for (const extender of this._registry.widgetExtensions(factory.name)) {
+      const disposable = extender.createNew(widget, context);
+      if (disposable) {
+        disposables.add(disposable);
+      }
+    }
     Private.disposablesProperty.set(widget, disposables);
     widget.disposed.connect(this._onWidgetDisposed, this);
 
@@ -129,7 +145,7 @@ export class DocumentWidgetManager implements IDisposable {
     context: DocumentRegistry.Context,
     widget: IDocumentWidget
   ): void {
-    let widgets = Private.widgetsProperty.get(context);
+    const widgets = Private.widgetsProperty.get(context);
     widgets.push(widget);
     MessageLoop.installMessageHook(widget, this);
     widget.addClass(DOCUMENT_CLASS);
@@ -153,12 +169,12 @@ export class DocumentWidgetManager implements IDisposable {
     context: DocumentRegistry.Context,
     widgetName: string
   ): IDocumentWidget | undefined {
-    let widgets = Private.widgetsProperty.get(context);
+    const widgets = Private.widgetsProperty.get(context);
     if (!widgets) {
       return undefined;
     }
     return find(widgets, widget => {
-      let factory = Private.factoryProperty.get(widget);
+      const factory = Private.factoryProperty.get(widget);
       if (!factory) {
         return false;
       }
@@ -189,15 +205,15 @@ export class DocumentWidgetManager implements IDisposable {
    *  if the source widget is not managed by this manager.
    */
   cloneWidget(widget: Widget): IDocumentWidget | undefined {
-    let context = Private.contextProperty.get(widget);
+    const context = Private.contextProperty.get(widget);
     if (!context) {
       return undefined;
     }
-    let factory = Private.factoryProperty.get(widget);
+    const factory = Private.factoryProperty.get(widget);
     if (!factory) {
       return undefined;
     }
-    let newWidget = factory.createNew(context, widget as IDocumentWidget);
+    const newWidget = factory.createNew(context, widget as IDocumentWidget);
     this._initializeWidget(newWidget, factory, context);
     return newWidget;
   }
@@ -208,10 +224,10 @@ export class DocumentWidgetManager implements IDisposable {
    * @param context - The document context object.
    */
   closeWidgets(context: DocumentRegistry.Context): Promise<void> {
-    let widgets = Private.widgetsProperty.get(context);
-    return Promise.all(
-      toArray(map(widgets, widget => this.onClose(widget)))
-    ).then(() => undefined);
+    const widgets = Private.widgetsProperty.get(context);
+    return Promise.all(widgets.map(widget => this.onClose(widget))).then(
+      () => undefined
+    );
   }
 
   /**
@@ -221,10 +237,10 @@ export class DocumentWidgetManager implements IDisposable {
    * @param context - The document context object.
    */
   deleteWidgets(context: DocumentRegistry.Context): Promise<void> {
-    let widgets = Private.widgetsProperty.get(context);
-    return Promise.all(
-      toArray(map(widgets, widget => this.onDelete(widget)))
-    ).then(() => undefined);
+    const widgets = Private.widgetsProperty.get(context);
+    return Promise.all(widgets.map(widget => this.onDelete(widget))).then(
+      () => undefined
+    );
   }
 
   /**
@@ -242,12 +258,22 @@ export class DocumentWidgetManager implements IDisposable {
       case 'close-request':
         void this.onClose(handler as Widget);
         return false;
-      case 'activate-request':
-        let context = this.contextForWidget(handler as Widget);
+      case 'activate-request': {
+        const widget = handler as Widget;
+        const context = this.contextForWidget(widget);
         if (context) {
+          context.ready
+            .then(() => {
+              // contentsModel is null until the context is ready
+              this._recordAsRecentlyOpened(widget, context.contentsModel!);
+            })
+            .catch(() => {
+              console.warn('Could not record the recents status for', context);
+            });
           this._activateRequested.emit(context.path);
         }
         break;
+      }
       default:
         break;
     }
@@ -259,12 +285,13 @@ export class DocumentWidgetManager implements IDisposable {
    *
    * @param widget - The target widget.
    */
-  protected setCaption(widget: Widget): Promise<void> {
-    let context = Private.contextProperty.get(widget);
+  protected async setCaption(widget: Widget): Promise<void> {
+    const trans = this.translator.load('jupyterlab');
+    const context = Private.contextProperty.get(widget);
     if (!context) {
       return;
     }
-    let model = context.contentsModel;
+    const model = context.contentsModel;
     if (!model) {
       widget.title.caption = '';
       return;
@@ -275,15 +302,19 @@ export class DocumentWidgetManager implements IDisposable {
         if (widget.isDisposed) {
           return;
         }
-        let last = checkpoints[checkpoints.length - 1];
-        let checkpoint = last ? Time.format(last.last_modified) : 'None';
-        let caption = `Name: ${model.name}\nPath: ${model.path}\n`;
-        if (context.model.readOnly) {
-          caption += 'Read-only';
+        const last = checkpoints[checkpoints.length - 1];
+        const checkpoint = last ? Time.format(last.last_modified) : 'None';
+        let caption = trans.__(
+          'Name: %1\nPath: %2\n',
+          model!.name,
+          model!.path
+        );
+        if (context!.model.readOnly) {
+          caption += trans.__('Read-only');
         } else {
           caption +=
-            `Last Saved: ${Time.format(model.last_modified)}\n` +
-            `Last Checkpoint: ${checkpoint}`;
+            trans.__('Last Saved: %1\n', Time.format(model!.last_modified)) +
+            trans.__('Last Checkpoint: %1', checkpoint);
         }
         widget.title.caption = caption;
       });
@@ -296,22 +327,49 @@ export class DocumentWidgetManager implements IDisposable {
    *
    * @returns A promise that resolves with whether the widget was closed.
    */
-  protected onClose(widget: Widget): Promise<boolean> {
+  protected async onClose(widget: Widget): Promise<boolean> {
     // Handle dirty state.
-    return this._maybeClose(widget)
-      .then(result => {
-        if (widget.isDisposed) {
+    const [shouldClose, ignoreSave] = await this._maybeClose(
+      widget,
+      this.translator
+    );
+    if (widget.isDisposed) {
+      return true;
+    }
+    if (shouldClose) {
+      const context = Private.contextProperty.get(widget);
+      if (!ignoreSave) {
+        if (!context) {
           return true;
         }
-        if (result) {
-          widget.dispose();
+        if (context.contentsModel?.writable) {
+          await context.save();
+        } else {
+          await context.saveAs();
         }
-        return result;
-      })
-      .catch(error => {
-        widget.dispose();
-        throw error;
-      });
+      }
+      if (context) {
+        const result = await Promise.race([
+          context.ready,
+          new Promise(resolve => setTimeout(resolve, 3000, 'timeout'))
+        ]);
+        if (result === 'timeout') {
+          console.warn(
+            'Could not record the widget as recently closed because the context did not become ready in 3 seconds'
+          );
+        } else {
+          // Note: `contentsModel` is null until the the context is ready;
+          // we have to handle it after `await` rather than in a `then`
+          // to ensure we record it as recent before the widget gets disposed.
+          this._recordAsRecentlyClosed(widget, context.contentsModel!);
+        }
+      }
+      if (widget.isDisposed) {
+        return true;
+      }
+      widget.dispose();
+    }
+    return shouldClose;
   }
 
   /**
@@ -325,55 +383,160 @@ export class DocumentWidgetManager implements IDisposable {
   }
 
   /**
+   * Record the activated file, and its parent directory, as recently opened.
+   */
+  private _recordAsRecentlyOpened(
+    widget: Widget,
+    model: Omit<Contents.IModel, 'content'>
+  ) {
+    const recents = this._recentsManager;
+    if (!recents) {
+      // no-op
+      return;
+    }
+    const path = model.path;
+    const fileType = this._registry.getFileTypeForModel(model);
+    const contentType = fileType.contentType;
+    const factory = Private.factoryProperty.get(widget)?.name;
+    recents.addRecent({ path, contentType, factory }, 'opened');
+    // Add the containing directory, too
+    if (contentType !== 'directory') {
+      const parent =
+        path.lastIndexOf('/') > 0 ? path.slice(0, path.lastIndexOf('/')) : '';
+      recents.addRecent({ path: parent, contentType: 'directory' }, 'opened');
+    }
+  }
+
+  /**
+   * Record the activated file, and its parent directory, as recently opened.
+   */
+  private _recordAsRecentlyClosed(
+    widget: Widget,
+    model: Omit<Contents.IModel, 'content'>
+  ) {
+    const recents = this._recentsManager;
+    if (!recents) {
+      // no-op
+      return;
+    }
+    const path = model.path;
+    const fileType = this._registry.getFileTypeForModel(model);
+    const contentType = fileType.contentType;
+    const factory = Private.factoryProperty.get(widget)?.name;
+    recents.addRecent({ path, contentType, factory }, 'closed');
+  }
+
+  /**
    * Ask the user whether to close an unsaved file.
    */
-  private _maybeClose(widget: Widget): Promise<boolean> {
+  private async _maybeClose(
+    widget: Widget,
+    translator?: ITranslator
+  ): Promise<[boolean, boolean]> {
+    translator = translator || nullTranslator;
+    const trans = translator.load('jupyterlab');
     // Bail if the model is not dirty or other widgets are using the model.)
-    let context = Private.contextProperty.get(widget);
+    const context = Private.contextProperty.get(widget);
     if (!context) {
-      return Promise.resolve(true);
+      return Promise.resolve([true, true]);
     }
     let widgets = Private.widgetsProperty.get(context);
     if (!widgets) {
-      return Promise.resolve(true);
+      return Promise.resolve([true, true]);
     }
     // Filter by whether the factories are read only.
-    widgets = toArray(
-      filter(widgets, widget => {
-        let factory = Private.factoryProperty.get(widget);
-        if (!factory) {
-          return false;
-        }
-        return factory.readOnly === false;
-      })
-    );
-    let factory = Private.factoryProperty.get(widget);
-    if (!factory) {
-      return Promise.resolve(true);
-    }
-    let model = context.model;
-    if (!model.dirty || widgets.length > 1 || factory.readOnly) {
-      return Promise.resolve(true);
-    }
-    let fileName = widget.title.label;
-    return showDialog({
-      title: 'Close without saving?',
-      body: `File "${fileName}" has unsaved changes, close without saving?`,
-      buttons: [Dialog.cancelButton(), Dialog.warnButton()]
-    }).then(result => {
-      return result.button.accept;
+    widgets = widgets.filter(widget => {
+      const factory = Private.factoryProperty.get(widget);
+      if (!factory) {
+        return false;
+      }
+      return factory.readOnly === false;
     });
+    const fileName = widget.title.label;
+
+    const factory = Private.factoryProperty.get(widget);
+    const isDirty =
+      context.model.dirty &&
+      widgets.length <= 1 &&
+      !(factory?.readOnly ?? true);
+
+    // Ask confirmation
+    if (this.confirmClosingDocument) {
+      const buttons = [
+        Dialog.cancelButton(),
+        Dialog.okButton({
+          label: isDirty ? trans.__('Close and save') : trans.__('Close'),
+          ariaLabel: isDirty
+            ? trans.__('Close and save Document')
+            : trans.__('Close Document')
+        })
+      ];
+      if (isDirty) {
+        buttons.splice(
+          1,
+          0,
+          Dialog.warnButton({
+            label: trans.__('Close without saving'),
+            ariaLabel: trans.__('Close Document without saving')
+          })
+        );
+      }
+
+      const confirm = await showDialog({
+        title: trans.__('Confirmation'),
+        body: trans.__('Please confirm you want to close "%1".', fileName),
+        checkbox: isDirty
+          ? null
+          : {
+              label: trans.__('Do not ask me again.'),
+              caption: trans.__(
+                'If checked, no confirmation to close a document will be asked in the future.'
+              )
+            },
+        buttons
+      });
+
+      if (confirm.isChecked) {
+        this.confirmClosingDocument = false;
+      }
+
+      return Promise.resolve([
+        confirm.button.accept,
+        isDirty ? confirm.button.displayType === 'warn' : true
+      ]);
+    } else {
+      if (!isDirty) {
+        return Promise.resolve([true, true]);
+      }
+
+      const saveLabel = context.contentsModel?.writable
+        ? trans.__('Save')
+        : trans.__('Save as');
+      const result = await showDialog({
+        title: trans.__('Save your work'),
+        body: trans.__('Save changes in "%1" before closing?', fileName),
+        buttons: [
+          Dialog.cancelButton(),
+          Dialog.warnButton({
+            label: trans.__('Discard'),
+            ariaLabel: trans.__('Discard changes to file')
+          }),
+          Dialog.okButton({ label: saveLabel })
+        ]
+      });
+      return [result.button.accept, result.button.displayType === 'warn'];
+    }
   }
 
   /**
    * Handle the disposal of a widget.
    */
   private _widgetDisposed(widget: Widget): void {
-    let context = Private.contextProperty.get(widget);
+    const context = Private.contextProperty.get(widget);
     if (!context) {
       return;
     }
-    let widgets = Private.widgetsProperty.get(context);
+    const widgets = Private.widgetsProperty.get(context);
     if (!widgets) {
       return;
     }
@@ -389,7 +552,7 @@ export class DocumentWidgetManager implements IDisposable {
    * Handle the disposal of a widget.
    */
   private _onWidgetDisposed(widget: Widget): void {
-    let disposables = Private.disposablesProperty.get(widget);
+    const disposables = Private.disposablesProperty.get(widget);
     disposables.dispose();
   }
 
@@ -397,25 +560,31 @@ export class DocumentWidgetManager implements IDisposable {
    * Handle a file changed signal for a context.
    */
   private _onFileChanged(context: DocumentRegistry.Context): void {
-    let widgets = Private.widgetsProperty.get(context);
-    each(widgets, widget => {
+    const widgets = Private.widgetsProperty.get(context);
+    for (const widget of widgets) {
       void this.setCaption(widget);
-    });
+    }
   }
 
   /**
    * Handle a path changed signal for a context.
    */
   private _onPathChanged(context: DocumentRegistry.Context): void {
-    let widgets = Private.widgetsProperty.get(context);
-    each(widgets, widget => {
+    const widgets = Private.widgetsProperty.get(context);
+    for (const widget of widgets) {
       void this.setCaption(widget);
-    });
+    }
   }
 
+  protected translator: ITranslator;
   private _registry: DocumentRegistry;
   private _activateRequested = new Signal<this, string>(this);
+  private _confirmClosingTab = false;
   private _isDisposed = false;
+  private _stateChanged = new Signal<DocumentWidgetManager, IChangedArgs<any>>(
+    this
+  );
+  private _recentsManager: IRecentsManager | null;
 }
 
 /**
@@ -430,6 +599,16 @@ export namespace DocumentWidgetManager {
      * A document registry instance.
      */
     registry: DocumentRegistry;
+
+    /**
+     * The manager for recent documents.
+     */
+    recentsManager?: IRecentsManager;
+
+    /**
+     * The application language translator.
+     */
+    translator?: ITranslator;
   }
 }
 

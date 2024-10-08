@@ -16,10 +16,10 @@
       "path": "../coreutils"
     },
     {
-      "path": "../mainmenu"
+      "path": "../services"
     },
     {
-      "path": "../services"
+      "path": "../translation"
     }
   ]
 }

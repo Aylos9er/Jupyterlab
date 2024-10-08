@@ -1,7 +1,7 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import { nbformat } from '@jupyterlab/coreutils';
+import * as nbformat from '@jupyterlab/nbformat';
 
 /**
  * The mime type service of a code editor.
@@ -15,7 +15,9 @@ export interface IEditorMimeTypeService {
    * @returns A valid mimetype.
    *
    * #### Notes
-   * If a mime type cannot be found returns the defaul mime type `text/plain`, never `null`.
+   * If a mime type cannot be found returns the default mime type `text/plain`, never `null`.
+   * There may be more than one mime type, but only the first one will be returned.
+   * To access all mime types, use `IEditorLanguageRegistry` instead.
    */
   getMimeTypeByLanguage(info: nbformat.ILanguageInfoMetadata): string;
 
@@ -27,7 +29,9 @@ export interface IEditorMimeTypeService {
    * @returns A valid mimetype.
    *
    * #### Notes
-   * If a mime type cannot be found returns the defaul mime type `text/plain`, never `null`.
+   * If a mime type cannot be found returns the default mime type `text/plain`, never `null`.
+   * There may be more than one mime type, but only the first one will be returned.
+   * To access all mime types, use `IEditorLanguageRegistry` instead.
    */
   getMimeTypeByFilePath(filePath: string): string;
 }

@@ -5,8 +5,13 @@
 .jp-DocumentSearch-input {
   border: none;
   outline: none;
+  color: var(--jp-ui-font-color0);
   font-size: var(--jp-ui-font-size1);
   background-color: var(--jp-layout-color0);
+  font-family: var(--jp-ui-font-family);
+  padding: 2px 1px;
+  resize: none;
+  white-space: pre;
 }
 
 .jp-DocumentSearch-overlay {
@@ -17,14 +22,29 @@
   top: 0;
   right: 0;
   z-index: 7;
-  min-width: 300px;
+  min-width: 405px;
   padding: 2px;
   font-size: var(--jp-ui-font-size1);
+
+  --jp-private-document-search-button-height: 20px;
 }
 
 .jp-DocumentSearch-overlay button {
   background-color: var(--jp-toolbar-background);
   outline: 0;
+}
+
+.jp-DocumentSearch-button-wrapper:disabled > .jp-DocumentSearch-button-content {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.jp-DocumentSearch-overlay button:not(:disabled):hover {
+  background-color: var(--jp-layout-color2);
+}
+
+.jp-DocumentSearch-overlay button:not(:disabled):active {
+  background-color: var(--jp-layout-color3);
 }
 
 .jp-DocumentSearch-overlay-row {
@@ -33,15 +53,15 @@
   margin-bottom: 2px;
 }
 
-.jp-DocumentSearch-overlay * {
-  color: var(--jp-ui-font-color0);
-  background-position: center;
-}
-
 .jp-DocumentSearch-button-content {
   display: inline-block;
   cursor: pointer;
   box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+}
+
+.jp-DocumentSearch-button-content svg {
   width: 100%;
   height: 100%;
 }
@@ -53,12 +73,8 @@
   margin: 2px;
 }
 
-.jp-DocumentSearch-focused-input {
-  border: var(--jp-border-width) solid var(--jp-cell-editor-active-border-color);
-}
-
-.jp-DocumentSearch-input-wrapper * {
-  background-color: var(--jp-layout-color0);
+.jp-DocumentSearch-input-wrapper:focus-within {
+  border-color: var(--jp-cell-editor-active-border-color);
 }
 
 .jp-DocumentSearch-toggle-wrapper,
@@ -68,17 +84,18 @@
   display: inline-block;
   border: none;
   box-sizing: border-box;
-  background-repeat: no-repeat;
 }
 
 .jp-DocumentSearch-toggle-wrapper {
+  flex-shrink: 0;
   width: 14px;
   height: 14px;
 }
 
 .jp-DocumentSearch-button-wrapper {
-  width: 20px;
-  height: 20px;
+  flex-shrink: 0;
+  width: var(--jp-private-document-search-button-height);
+  height: var(--jp-private-document-search-button-height);
 }
 
 .jp-DocumentSearch-toggle-wrapper:focus,
@@ -98,15 +115,7 @@
   width: 5px;
 }
 
-.jp-DocumentSearch-regex-button {
-  background-image: var(--jp-icon-search-regex);
-}
-
-.jp-DocumentSearch-case-button {
-  background-image: var(--jp-icon-search-case-sensitive);
-}
-
-.jp-DocumentSearch-input-button:before {
+.jp-DocumentSearch-input-button::before {
   display: block;
   padding-top: 100%;
 }
@@ -127,59 +136,77 @@
   padding-left: 10px;
   padding-right: 10px;
   user-select: none;
-  min-width: 43px;
+  min-width: 35px;
   display: inline-block;
 }
 
 .jp-DocumentSearch-up-down-wrapper {
   display: inline-block;
   padding-right: 2px;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.jp-DocumentSearch-spacer {
+  margin-left: auto;
 }
 
 .jp-DocumentSearch-up-down-wrapper button {
   outline: 0;
   border: none;
-  width: 20px;
-  height: 20px;
-  background-repeat: no-repeat;
-  background-position: center;
+  width: var(--jp-private-document-search-button-height);
+  height: var(--jp-private-document-search-button-height);
   vertical-align: middle;
-  margin: 1px 7px 2px;
+  margin: 1px 5px 2px;
 }
 
-.jp-DocumentSearch-up-button {
-  background-image: var(--jp-icon-search-arrow-up);
+button:not(:disabled) > .jp-DocumentSearch-up-down-button:hover {
+  background-color: var(--jp-layout-color2);
 }
 
-.jp-DocumentSearch-down-button {
-  background-image: var(--jp-icon-search-arrow-down);
+button:not(:disabled) > .jp-DocumentSearch-up-down-button:active {
+  background-color: var(--jp-layout-color3);
 }
 
-.jp-DocumentSearch-close-button {
-  display: inline-block;
-  background-size: 16px;
-  background-image: var(--jp-icon-close);
-  background-repeat: no-repeat;
-  background-position: center;
-  vertical-align: middle;
+.jp-DocumentSearch-filter-button {
+  border-radius: var(--jp-border-radius);
 }
 
-.jp-DocumentSearch-close-button:hover {
-  background-size: 16px;
-  background-image: var(--jp-icon-close-circle);
+.jp-DocumentSearch-filter-button:hover {
+  background-color: var(--jp-layout-color2);
+}
+
+.jp-DocumentSearch-filter-button-enabled {
+  background-color: var(--jp-layout-color2);
+}
+
+.jp-DocumentSearch-filter-button-enabled:hover {
+  background-color: var(--jp-layout-color3);
+}
+
+.jp-DocumentSearch-search-options {
+  padding: 0 8px;
+  margin-left: 3px;
+  width: 100%;
+  display: grid;
+  justify-content: start;
+  grid-template-columns: 1fr 1fr;
+  align-items: center;
+  justify-items: stretch;
+}
+
+.jp-DocumentSearch-search-filter-disabled {
+  color: var(--jp-ui-font-color2);
+}
+
+.jp-DocumentSearch-search-filter {
+  display: flex;
+  align-items: center;
+  user-select: none;
 }
 
 .jp-DocumentSearch-regex-error {
   color: var(--jp-error-color0);
-}
-
-.jp-DocumentSearch-replace-entry {
-  border: var(--jp-border-width) solid var(--jp-border-color0);
-  display: flex;
-  background-color: var(--jp-layout-color0);
-  font-size: var(--jp-ui-font-size1);
-  width: 186px;
-  margin: 2px;
 }
 
 .jp-DocumentSearch-replace-button-wrapper {
@@ -187,10 +214,12 @@
   display: inline-block;
   box-sizing: border-box;
   border: var(--jp-border-width) solid var(--jp-border-color0);
-  margin: 2px;
+  margin: auto 2px;
+  padding: 1px 4px;
+  height: calc(var(--jp-private-document-search-button-height) + 2px);
+  flex-shrink: 0;
 }
 
-.jp-DocumentSearch-replace-entry:focus,
 .jp-DocumentSearch-replace-button-wrapper:focus {
   border: var(--jp-border-width) solid var(--jp-cell-editor-active-border-color);
 }
@@ -200,8 +229,10 @@
   text-align: center;
   cursor: pointer;
   box-sizing: border-box;
-  background-color: var(--jp-toolbar-background);
-  color: var(--jp-font-color1);
+  color: var(--jp-ui-font-color1);
+
+  /* height - 2 * (padding of wrapper) */
+  line-height: calc(var(--jp-private-document-search-button-height) - 2px);
   width: 100%;
   height: 100%;
 }
@@ -215,16 +246,46 @@
   display: flex;
 }
 
-.jp-DocumentSearch-replace-toggle-collapsed,
-.jp-DocumentSearch-replace-toggle-expanded {
+.jp-DocumentSearch-replace-toggle {
   border: none;
   background-color: var(--jp-toolbar-background);
+  border-radius: var(--jp-border-radius);
 }
 
-.jp-DocumentSearch-replace-toggle-collapsed {
-  background-image: var(--jp-image-caretright);
+.jp-DocumentSearch-replace-toggle:hover {
+  background-color: var(--jp-layout-color2);
 }
 
-.jp-DocumentSearch-replace-toggle-expanded {
-  background-image: var(--jp-image-caretdown);
+/*
+  The following few rules allow the search box to expand horizontally,
+  as the text within it grows. This is done by using putting
+  the text within a wrapper element and using that wrapper for sizing,
+  as <textarea> and <input> tags do not grow automatically.
+  This is the underlying technique:
+  https://til.simonwillison.net/css/resizing-textarea
+*/
+.jp-DocumentSearch-input-label::after {
+  content: attr(data-value) ' ';
+  visibility: hidden;
+  white-space: pre;
+}
+
+.jp-DocumentSearch-input-label {
+  display: inline-grid;
+  align-items: stretch;
+}
+
+.jp-DocumentSearch-input-label::after,
+.jp-DocumentSearch-input-label > .jp-DocumentSearch-input {
+  width: auto;
+  min-width: 1em;
+  grid-area: 1/2;
+  font: inherit;
+  padding: 2px 3px;
+  margin: 0;
+  resize: none;
+  background: none;
+  appearance: none;
+  border: none;
+  overflow: hidden;
 }

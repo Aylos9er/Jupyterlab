@@ -1,7 +1,10 @@
+.. Copyright (c) Jupyter Development Team.
+.. Distributed under the terms of the Modified BSD License.
+
 .. _kernel-backed-documents:
 
 Documents and Kernels
----------------------
+=====================
 
 In the Jupyter architecture, kernels are separate processes started by
 the server that run your code in different programming languages and

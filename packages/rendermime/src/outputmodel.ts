@@ -1,22 +1,24 @@
-/*-----------------------------------------------------------------------------
+/* -----------------------------------------------------------------------------
 | Copyright (c) Jupyter Development Team.
 | Distributed under the terms of the Modified BSD License.
 |----------------------------------------------------------------------------*/
+import * as nbformat from '@jupyterlab/nbformat';
+import {
+  IObservableJSON,
+  IObservableString,
+  ObservableJSON,
+  ObservableString
+} from '@jupyterlab/observables';
+import { IRenderMime } from '@jupyterlab/rendermime-interfaces';
 import {
   JSONExt,
   JSONObject,
   JSONValue,
-  ReadonlyJSONObject
-} from '@phosphor/coreutils';
-
-import { ISignal, Signal } from '@phosphor/signaling';
-
-import { nbformat } from '@jupyterlab/coreutils';
-
-import { IObservableJSON, ObservableJSON } from '@jupyterlab/observables';
-
-import { IRenderMime } from '@jupyterlab/rendermime-interfaces';
-
+  PartialJSONObject,
+  PartialJSONValue,
+  ReadonlyPartialJSONObject
+} from '@lumino/coreutils';
+import { ISignal, Signal } from '@lumino/signaling';
 import { MimeModel } from './mimemodel';
 
 /**
@@ -37,6 +39,11 @@ export interface IOutputModel extends IRenderMime.IMimeModel {
    * The execution count of the model.
    */
   readonly executionCount: nbformat.ExecutionCount;
+
+  /**
+   * The observable text, present when the output `type` is set to `"stream"`.
+   */
+  readonly streamText?: IObservableString;
 
   /**
    * Whether the output is trusted.
@@ -82,15 +89,21 @@ export class OutputModel implements IOutputModel {
    * Construct a new output model.
    */
   constructor(options: IOutputModel.IOptions) {
-    let { data, metadata, trusted } = Private.getBundleOptions(options);
-    this._data = new ObservableJSON({ values: data as JSONObject });
+    const { data, metadata, trusted } = Private.getBundleOptions(options);
     this._rawData = data;
+    if (options.value !== undefined && nbformat.isStream(options.value)) {
+      this._text = new ObservableString(
+        typeof options.value.text === 'string'
+          ? options.value.text
+          : options.value.text.join('')
+      );
+    }
     this._metadata = new ObservableJSON({ values: metadata as JSONObject });
     this._rawMetadata = metadata;
     this.trusted = trusted;
     // Make a copy of the data.
-    let value = options.value;
-    for (let key in value) {
+    const value = options.value;
+    for (const key in value) {
       // Ignore data and metadata that were stripped.
       switch (key) {
         case 'data':
@@ -134,7 +147,7 @@ export class OutputModel implements IOutputModel {
    * Dispose of the resources used by the output model.
    */
   dispose(): void {
-    this._data.dispose();
+    this._text?.dispose();
     this._metadata.dispose();
     Signal.clearData(this);
   }
@@ -142,14 +155,18 @@ export class OutputModel implements IOutputModel {
   /**
    * The data associated with the model.
    */
-  get data(): ReadonlyJSONObject {
-    return this._rawData;
+  get data(): ReadonlyPartialJSONObject {
+    return Private.getData(this.toJSON());
+  }
+
+  get streamText(): IObservableString | undefined {
+    return this._text;
   }
 
   /**
    * The metadata associated with the model.
    */
-  get metadata(): ReadonlyJSONObject {
+  get metadata(): ReadonlyPartialJSONObject {
     return this._rawMetadata;
   }
 
@@ -162,30 +179,32 @@ export class OutputModel implements IOutputModel {
    */
   setData(options: IRenderMime.IMimeModel.ISetDataOptions): void {
     if (options.data) {
-      this._updateObservable(this._data, options.data);
       this._rawData = options.data;
     }
     if (options.metadata) {
-      this._updateObservable(this._metadata, options.metadata);
+      this._updateObservable(this._metadata, options.metadata!);
       this._rawMetadata = options.metadata;
     }
-    this._changed.emit(void 0);
+    this._changed.emit();
   }
 
   /**
    * Serialize the model to JSON.
    */
   toJSON(): nbformat.IOutput {
-    let output: JSONValue = {};
-    for (let key in this._raw) {
+    const output: PartialJSONValue = {};
+    for (const key in this._raw) {
       output[key] = Private.extract(this._raw, key);
+    }
+    if (this._text !== undefined) {
+      output['text'] = this._text.text;
     }
     switch (this.type) {
       case 'display_data':
       case 'execute_result':
       case 'update_display_data':
-        output['data'] = this.data as JSONObject;
-        output['metadata'] = this.metadata as JSONObject;
+        output['data'] = this._rawData as PartialJSONObject;
+        output['metadata'] = this.metadata as PartialJSONObject;
         break;
       default:
         break;
@@ -200,22 +219,22 @@ export class OutputModel implements IOutputModel {
    */
   private _updateObservable(
     observable: IObservableJSON,
-    data: ReadonlyJSONObject
+    data: ReadonlyPartialJSONObject
   ) {
-    let oldKeys = observable.keys();
-    let newKeys = Object.keys(data);
+    const oldKeys = observable.keys();
+    const newKeys = Object.keys(data);
 
     // Handle removed keys.
-    for (let key of oldKeys) {
+    for (const key of oldKeys) {
       if (newKeys.indexOf(key) === -1) {
         observable.delete(key);
       }
     }
 
     // Handle changed data.
-    for (let key of newKeys) {
-      let oldValue = observable.get(key);
-      let newValue = data[key];
+    for (const key of newKeys) {
+      const oldValue = observable.get(key);
+      const newValue = data[key];
       if (oldValue !== newValue) {
         observable.set(key, newValue as JSONValue);
       }
@@ -223,10 +242,10 @@ export class OutputModel implements IOutputModel {
   }
 
   private _changed = new Signal<this, void>(this);
-  private _raw: JSONObject = {};
-  private _rawMetadata: ReadonlyJSONObject;
-  private _rawData: ReadonlyJSONObject;
-  private _data: IObservableJSON;
+  private _raw: PartialJSONObject = {};
+  private _rawMetadata: ReadonlyPartialJSONObject;
+  private _rawData: ReadonlyPartialJSONObject;
+  private _text?: IObservableString = undefined;
   private _metadata: IObservableJSON;
 }
 
@@ -237,22 +256,22 @@ export namespace OutputModel {
   /**
    * Get the data for an output.
    *
-   * @params output - A kernel output message payload.
+   * @param output - A kernel output message payload.
    *
    * @returns - The data for the payload.
    */
-  export function getData(output: nbformat.IOutput): JSONObject {
+  export function getData(output: nbformat.IOutput): PartialJSONObject {
     return Private.getData(output);
   }
 
   /**
    * Get the metadata from an output message.
    *
-   * @params output - A kernel output message payload.
+   * @param output - A kernel output message payload.
    *
    * @returns - The metadata for the payload.
    */
-  export function getMetadata(output: nbformat.IOutput): JSONObject {
+  export function getMetadata(output: nbformat.IOutput): PartialJSONObject {
     return Private.getMetadata(output);
   }
 }
@@ -264,7 +283,7 @@ namespace Private {
   /**
    * Get the data from a notebook output.
    */
-  export function getData(output: nbformat.IOutput): JSONObject {
+  export function getData(output: nbformat.IOutput): PartialJSONObject {
     let bundle: nbformat.IMimeBundle = {};
     if (
       nbformat.isExecuteResult(output) ||
@@ -280,7 +299,7 @@ namespace Private {
       }
     } else if (nbformat.isError(output)) {
       bundle['application/vnd.jupyter.error'] = output;
-      let traceback = output.traceback.join('\n');
+      const traceback = output.traceback.join('\n');
       bundle['application/vnd.jupyter.stderr'] =
         traceback || `${output.ename}: ${output.evalue}`;
     }
@@ -290,10 +309,10 @@ namespace Private {
   /**
    * Get the metadata from an output message.
    */
-  export function getMetadata(output: nbformat.IOutput): JSONObject {
-    let value: JSONObject = Object.create(null);
+  export function getMetadata(output: nbformat.IOutput): PartialJSONObject {
+    const value: PartialJSONObject = Object.create(null);
     if (nbformat.isExecuteResult(output) || nbformat.isDisplayData(output)) {
-      for (let key in output.metadata) {
+      for (const key in output.metadata) {
         value[key] = extract(output.metadata, key);
       }
     }
@@ -305,19 +324,22 @@ namespace Private {
    */
   export function getBundleOptions(
     options: IOutputModel.IOptions
-  ): MimeModel.IOptions {
-    let data = getData(options.value);
-    let metadata = getMetadata(options.value);
-    let trusted = !!options.trusted;
+  ): Required<Omit<MimeModel.IOptions, 'callback'>> {
+    const data = getData(options.value);
+    const metadata = getMetadata(options.value);
+    const trusted = !!options.trusted;
     return { data, metadata, trusted };
   }
 
   /**
    * Extract a value from a JSONObject.
    */
-  export function extract(value: JSONObject, key: string): JSONValue {
-    let item = value[key];
-    if (JSONExt.isPrimitive(item)) {
+  export function extract(
+    value: ReadonlyPartialJSONObject,
+    key: string
+  ): PartialJSONValue | undefined {
+    const item = value[key];
+    if (item === undefined || JSONExt.isPrimitive(item)) {
       return item;
     }
     return JSON.parse(JSON.stringify(item));
@@ -326,9 +348,9 @@ namespace Private {
   /**
    * Convert a mime bundle to mime data.
    */
-  function convertBundle(bundle: nbformat.IMimeBundle): JSONObject {
-    let map: JSONObject = Object.create(null);
-    for (let mimeType in bundle) {
+  function convertBundle(bundle: nbformat.IMimeBundle): PartialJSONObject {
+    const map: PartialJSONObject = Object.create(null);
+    for (const mimeType in bundle) {
       map[mimeType] = extract(bundle, mimeType);
     }
     return map;

@@ -1,7 +1,10 @@
+.. Copyright (c) Jupyter Development Team.
+.. Distributed under the terms of the Modified BSD License.
+
 .. _css:
 
 CSS Patterns
-------------
+============
 
 This document describes the patterns we are using to organize and write
 CSS for JupyterLab. JupyterLab is developed using a set of npm packages
@@ -9,7 +12,7 @@ that are located in ``packages``. Each of these packages has its own
 style, but depend on CSS variables defined in a main theme package.
 
 CSS checklist
-~~~~~~~~~~~~~
+-------------
 
 -  CSS classnames are defined inline in the code. We used to put them as
    all caps file-level ``const``\ s, but we are moving away from that.
@@ -23,7 +26,7 @@ CSS checklist
    sparingly and in accordance with the conventions described below.
 
 CSS variables
-~~~~~~~~~~~~~
+-------------
 
 We are using native CSS variables in JupyterLab. This is to enable
 dynamic theming of built-in and third party plugins. As of December
@@ -69,9 +72,8 @@ is simple:
 CSS variable usage
 ^^^^^^^^^^^^^^^^^^
 
-JupyterLab includes a default set of CSS variables in the file:
-
-``packages/theme-light-extension/style/variables.css``
+JupyterLab includes a default set of CSS variables in the file
+`packages/theme-light-extension/style/variables.css <https://github.com/jupyterlab/jupyterlab/blob/main/packages/theme-light-extension/style/variables.css>`_.
 
 To ensure consistent design in JupyterLab, all built-in and third party
 extensions should use these variables in their styles if at all
@@ -85,7 +87,7 @@ Again, we consider the names of the public CSS variables in this package
 to be our public API for CSS.
 
 File organization
-~~~~~~~~~~~~~~~~~
+-----------------
 
 We are organizing our CSS files in the following manner:
 
@@ -104,7 +106,7 @@ We are organizing our CSS files in the following manner:
 
 
 CSS class names
-~~~~~~~~~~~~~~~
+---------------
 
 CSS class naming conventions
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -112,7 +114,7 @@ CSS class naming conventions
 We have a fairly formal method for naming our CSS classes.
 
 First, CSS class names are associated with TypeScript classes that
-extend ``phosphor.Widget``:
+extend ``lumino.Widget``:
 
 The ``.node`` of each such widget should have a CSS class that matches
 the name of the TypeScript class:
@@ -234,7 +236,7 @@ intended to be used for adding context menu items and keyboard shortcuts.
 **CSS classes that describe the state of a widget**
 
 -  ``jp-mod-current``: applied to elements on the current document only
--  ``jp-mod-completer-enabled``: applied to ediors that can host a completer
+-  ``jp-mod-completer-enabled``: applied to editors that can host a completer
 -  ``jp-mod-commandMode``: applied to a notebook in command mode
 -  ``jp-mod-editMode``: applied to a notebook in edit mode
 -  ``jp-mod-has-primary-selection``: applied to editors that have a primary selection

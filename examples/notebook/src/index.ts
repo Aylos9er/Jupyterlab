@@ -2,49 +2,60 @@
 // Distributed under the terms of the Modified BSD License.
 
 import { PageConfig, URLExt } from '@jupyterlab/coreutils';
-// @ts-ignore
-__webpack_public_path__ = URLExt.join(PageConfig.getBaseUrl(), 'example/');
+(window as any).__webpack_public_path__ = URLExt.join(
+  PageConfig.getBaseUrl(),
+  'example/'
+);
 
-import '@jupyterlab/application/style/index.css';
-import '@jupyterlab/codemirror/style/index.css';
-import '@jupyterlab/notebook/style/index.css';
-import '@jupyterlab/theme-light-extension/style/index.css';
-import '../index.css';
+// Import style through JS file to deduplicate them.
+import './style';
 
-import { CommandRegistry } from '@phosphor/commands';
-
-import { CommandPalette, SplitPanel, Widget } from '@phosphor/widgets';
-
-import { ServiceManager } from '@jupyterlab/services';
-import { MathJaxTypesetter } from '@jupyterlab/mathjax2';
-
+import { IYText } from '@jupyter/ydoc';
 import {
+  Toolbar as AppToolbar,
+  CommandToolbarButton,
+  SessionContextDialogs
+} from '@jupyterlab/apputils';
+import {
+  CodeMirrorEditorFactory,
+  CodeMirrorMimeTypeService,
+  EditorExtensionRegistry,
+  EditorLanguageRegistry,
+  EditorThemeRegistry,
+  ybinding
+} from '@jupyterlab/codemirror';
+import {
+  Completer,
+  CompleterModel,
+  CompletionHandler,
+  KernelCompleterProvider,
+  ProviderReconciliator
+} from '@jupyterlab/completer';
+import { DocumentManager } from '@jupyterlab/docmanager';
+import { DocumentRegistry } from '@jupyterlab/docregistry';
+import { createMarkdownParser } from '@jupyterlab/markedparser-extension';
+import { MathJaxTypesetter } from '@jupyterlab/mathjax-extension';
+import {
+  ExecutionIndicator,
+  NotebookModelFactory,
   NotebookPanel,
   NotebookWidgetFactory,
-  NotebookModelFactory
+  StaticNotebook,
+  ToolbarItems
 } from '@jupyterlab/notebook';
-
 import {
-  CompleterModel,
-  Completer,
-  CompletionHandler,
-  KernelConnector
-} from '@jupyterlab/completer';
-
-import { editorServices } from '@jupyterlab/codemirror';
-
-import { DocumentManager } from '@jupyterlab/docmanager';
-
-import { DocumentRegistry } from '@jupyterlab/docregistry';
-
-import {
-  RenderMimeRegistry,
-  standardRendererFactories as initialFactories
+  standardRendererFactories as initialFactories,
+  RenderMimeRegistry
 } from '@jupyterlab/rendermime';
-import { SetupCommands } from './commands';
+import { ServiceManager } from '@jupyterlab/services';
+import { Toolbar } from '@jupyterlab/ui-components';
+import { CommandRegistry } from '@lumino/commands';
+import { CommandPalette, SplitPanel, Widget } from '@lumino/widgets';
+
+import { COMMAND_IDS, setupCommands } from './commands';
 
 function main(): void {
-  let manager = new ServiceManager();
+  const manager = new ServiceManager();
   void manager.ready.then(() => {
     createApp(manager);
   });
@@ -52,8 +63,8 @@ function main(): void {
 
 function createApp(manager: ServiceManager.IManager): void {
   // Initialize the command registry with the bindings.
-  let commands = new CommandRegistry();
-  let useCapture = true;
+  const commands = new CommandRegistry();
+  const useCapture = true;
 
   // Setup the keydown listener for the document.
   document.addEventListener(
@@ -64,31 +75,128 @@ function createApp(manager: ServiceManager.IManager): void {
     useCapture
   );
 
-  let rendermime = new RenderMimeRegistry({
+  const languages = new EditorLanguageRegistry();
+
+  const rendermime = new RenderMimeRegistry({
     initialFactories: initialFactories,
-    latexTypesetter: new MathJaxTypesetter({
-      url: PageConfig.getOption('mathjaxUrl'),
-      config: PageConfig.getOption('mathjaxConfig')
-    })
+    latexTypesetter: new MathJaxTypesetter(),
+    markdownParser: createMarkdownParser(languages)
   });
 
-  let opener = {
+  const opener = {
     open: (widget: Widget) => {
       // Do nothing for sibling widgets for now.
+    },
+    get opened() {
+      return {
+        connect: () => {
+          return false;
+        },
+        disconnect: () => {
+          return false;
+        }
+      };
     }
   };
 
-  let docRegistry = new DocumentRegistry();
-  let docManager = new DocumentManager({
+  const docRegistry = new DocumentRegistry();
+  const docManager = new DocumentManager({
     registry: docRegistry,
     manager,
     opener
   });
-  let mFactory = new NotebookModelFactory({});
-  let editorFactory = editorServices.factoryService.newInlineEditor;
-  let contentFactory = new NotebookPanel.ContentFactory({ editorFactory });
+  const mFactory = new NotebookModelFactory({});
+  const editorExtensions = () => {
+    const themes = new EditorThemeRegistry();
+    EditorThemeRegistry.getDefaultThemes().forEach(theme => {
+      themes.addTheme(theme);
+    });
+    const registry = new EditorExtensionRegistry();
 
-  let wFactory = new NotebookWidgetFactory({
+    EditorExtensionRegistry.getDefaultExtensions({ themes }).forEach(
+      extensionFactory => {
+        registry.addExtension(extensionFactory);
+      }
+    );
+    registry.addExtension({
+      name: 'shared-model-binding',
+      factory: options => {
+        const sharedModel = options.model.sharedModel as IYText;
+        return EditorExtensionRegistry.createImmutableExtension(
+          ybinding({
+            ytext: sharedModel.ysource,
+            undoManager: sharedModel.undoManager ?? undefined
+          })
+        );
+      }
+    });
+    return registry;
+  };
+  EditorLanguageRegistry.getDefaultLanguages()
+    .filter(language =>
+      ['ipython', 'julia', 'python'].includes(language.name.toLowerCase())
+    )
+    .forEach(language => {
+      languages.addLanguage(language);
+    });
+  // Language for Markdown cells
+  languages.addLanguage({
+    name: 'ipythongfm',
+    mime: 'text/x-ipythongfm',
+    load: async () => {
+      const m = await import('@codemirror/lang-markdown');
+      return m.markdown({
+        codeLanguages: (info: string) => languages.findBest(info) as any
+      });
+    }
+  });
+  const factoryService = new CodeMirrorEditorFactory({
+    extensions: editorExtensions(),
+    languages
+  });
+  const mimeTypeService = new CodeMirrorMimeTypeService(languages);
+  const editorFactory = factoryService.newInlineEditor;
+  const contentFactory = new NotebookPanel.ContentFactory({ editorFactory });
+
+  const sessionContextDialogs = new SessionContextDialogs();
+  const toolbarFactory = (panel: NotebookPanel) =>
+    [
+      COMMAND_IDS.save,
+      COMMAND_IDS.insert,
+      COMMAND_IDS.deleteCell,
+      COMMAND_IDS.cut,
+      COMMAND_IDS.copy,
+      COMMAND_IDS.paste,
+      COMMAND_IDS.runAndAdvance,
+      COMMAND_IDS.interrupt,
+      COMMAND_IDS.restart,
+      COMMAND_IDS.restartAndRun
+    ]
+      .map<DocumentRegistry.IToolbarItem>(id => ({
+        name: id,
+        widget: new CommandToolbarButton({
+          commands,
+          id,
+          args: { toolbar: true }
+        })
+      }))
+      .concat([
+        { name: 'cellType', widget: ToolbarItems.createCellTypeItem(panel) },
+        { name: 'spacer', widget: Toolbar.createSpacerItem() },
+        {
+          name: 'kernelName',
+          widget: AppToolbar.createKernelNameItem(
+            panel.sessionContext,
+            sessionContextDialogs
+          )
+        },
+        {
+          name: 'executionProgress',
+          widget: ExecutionIndicator.createExecutionIndicatorItem(panel)
+        }
+      ]);
+
+  const wFactory = new NotebookWidgetFactory({
     name: 'Notebook',
     modelName: 'notebook',
     fileTypes: ['notebook'],
@@ -97,22 +205,45 @@ function createApp(manager: ServiceManager.IManager): void {
     canStartKernel: true,
     rendermime,
     contentFactory,
-    mimeTypeService: editorServices.mimeTypeService
+    mimeTypeService,
+    toolbarFactory,
+    notebookConfig: {
+      ...StaticNotebook.defaultNotebookConfig,
+      windowingMode: 'none'
+    }
   });
   docRegistry.addModelFactory(mFactory);
   docRegistry.addWidgetFactory(wFactory);
 
-  let notebookPath = PageConfig.getOption('notebookPath');
-  let nbWidget = docManager.open(notebookPath) as NotebookPanel;
-  let palette = new CommandPalette({ commands });
+  const notebookPath = PageConfig.getOption('notebookPath');
+  const nbWidget = docManager.open(notebookPath) as NotebookPanel;
+  const palette = new CommandPalette({ commands });
   palette.addClass('notebookCommandPalette');
 
   const editor =
     nbWidget.content.activeCell && nbWidget.content.activeCell.editor;
   const model = new CompleterModel();
   const completer = new Completer({ editor, model });
-  const connector = new KernelConnector({ session: nbWidget.session });
-  const handler = new CompletionHandler({ completer, connector });
+  const sessionContext = nbWidget.context.sessionContext;
+  const timeout = 1000;
+  const provider = new KernelCompleterProvider();
+  const reconciliator = new ProviderReconciliator({
+    context: { widget: nbWidget, editor, session: sessionContext.session },
+    providers: [provider],
+    timeout: timeout
+  });
+  const handler = new CompletionHandler({ completer, reconciliator });
+
+  void sessionContext.ready.then(() => {
+    const provider = new KernelCompleterProvider();
+    const reconciliator = new ProviderReconciliator({
+      context: { widget: nbWidget, editor, session: sessionContext.session },
+      providers: [provider],
+      timeout: timeout
+    });
+
+    handler.reconciliator = reconciliator;
+  });
 
   // Set the handler's editor.
   handler.editor = editor;
@@ -125,7 +256,7 @@ function createApp(manager: ServiceManager.IManager): void {
   // Hide the widget when it first loads.
   completer.hide();
 
-  let panel = new SplitPanel();
+  const panel = new SplitPanel();
   panel.id = 'main';
   panel.orientation = 'horizontal';
   panel.spacing = 0;
@@ -133,6 +264,10 @@ function createApp(manager: ServiceManager.IManager): void {
   SplitPanel.setStretch(nbWidget, 1);
   panel.addWidget(palette);
   panel.addWidget(nbWidget);
+
+  // Ensure Jupyter styling
+  panel.addClass('jp-ThemedContainer');
+  completer.addClass('jp-ThemedContainer');
 
   // Attach the panel to the DOM.
   Widget.attach(panel, document.body);
@@ -143,9 +278,9 @@ function createApp(manager: ServiceManager.IManager): void {
     panel.update();
   });
 
-  SetupCommands(commands, palette, nbWidget, handler);
+  setupCommands(commands, palette, nbWidget, handler, sessionContextDialogs);
 
-  console.log('Example started!');
+  console.debug('Example started!');
 }
 
 window.addEventListener('load', main);

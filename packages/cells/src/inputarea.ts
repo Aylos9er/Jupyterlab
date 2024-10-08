@@ -1,15 +1,13 @@
-/*-----------------------------------------------------------------------------
+/* -----------------------------------------------------------------------------
 | Copyright (c) Jupyter Development Team.
 | Distributed under the terms of the Modified BSD License.
 |----------------------------------------------------------------------------*/
 
-import { PanelLayout } from '@phosphor/widgets';
+import { PanelLayout } from '@lumino/widgets';
 
-import { Widget } from '@phosphor/widgets';
+import { Widget } from '@lumino/widgets';
 
 import { CodeEditor, CodeEditorWrapper } from '@jupyterlab/codeeditor';
-
-import { CodeMirrorEditorFactory } from '@jupyterlab/codemirror';
 
 import { ICellModel } from './model';
 
@@ -33,7 +31,7 @@ const INPUT_PROMPT_CLASS = 'jp-InputPrompt';
  */
 const INPUT_AREA_EDITOR_CLASS = 'jp-InputArea-editor';
 
-/******************************************************************************
+/** ****************************************************************************
  * InputArea
  ******************************************************************************/
 
@@ -47,24 +45,23 @@ export class InputArea extends Widget {
   constructor(options: InputArea.IOptions) {
     super();
     this.addClass(INPUT_AREA_CLASS);
-    let model = (this.model = options.model);
-    let contentFactory = (this.contentFactory =
-      options.contentFactory || InputArea.defaultContentFactory);
+    const { contentFactory, editorOptions, model } = options;
+    this.model = model;
+    this.contentFactory = contentFactory;
 
     // Prompt
-    let prompt = (this._prompt = contentFactory.createInputPrompt());
+    const prompt = (this._prompt = contentFactory.createInputPrompt());
     prompt.addClass(INPUT_AREA_PROMPT_CLASS);
 
     // Editor
-    let editorOptions = {
-      model,
+    const editor = (this._editor = new CodeEditorWrapper({
       factory: contentFactory.editorFactory,
-      updateOnShow: options.updateOnShow
-    };
-    let editor = (this._editor = new CodeEditorWrapper(editorOptions));
+      model,
+      editorOptions
+    }));
     editor.addClass(INPUT_AREA_EDITOR_CLASS);
 
-    let layout = (this.layout = new PanelLayout());
+    const layout = (this.layout = new PanelLayout());
     layout.addWidget(prompt);
     layout.addWidget(editor);
   }
@@ -101,10 +98,17 @@ export class InputArea extends Widget {
   }
 
   /**
+   * Get the rendered input area widget, if any.
+   */
+  get renderedInput(): Widget {
+    return this._rendered;
+  }
+
+  /**
    * Render an input instead of the text editor.
    */
   renderInput(widget: Widget): void {
-    let layout = this.layout as PanelLayout;
+    const layout = this.layout as PanelLayout;
     if (this._rendered) {
       this._rendered.parent = null;
     }
@@ -133,20 +137,20 @@ export class InputArea extends Widget {
   /**
    * Dispose of the resources held by the widget.
    */
-  dispose() {
+  dispose(): void {
     // Do nothing if already disposed.
     if (this.isDisposed) {
       return;
     }
-    this._prompt = null;
-    this._editor = null;
-    this._rendered = null;
+    this._prompt = null!;
+    this._editor = null!;
+    this._rendered = null!;
     super.dispose();
   }
 
-  private _prompt: IInputPrompt = null;
-  private _editor: CodeEditorWrapper = null;
-  private _rendered: Widget = null;
+  private _prompt: IInputPrompt;
+  private _editor: CodeEditorWrapper;
+  private _rendered: Widget;
 }
 
 /**
@@ -164,15 +168,13 @@ export namespace InputArea {
 
     /**
      * The content factory used by the widget to create children.
-     *
-     * Defaults to one that uses CodeMirror.
      */
-    contentFactory?: IContentFactory;
+    contentFactory: IContentFactory;
 
     /**
-     * Whether to send an update request to the editor when it is shown.
+     * Editor options
      */
-    updateOnShow?: boolean;
+    editorOptions?: Omit<CodeEditor.IOptions, 'host' | 'model'>;
   }
 
   /**
@@ -183,7 +185,7 @@ export namespace InputArea {
    */
   export interface IContentFactory {
     /**
-     * The editor factory we need to include in `CodeEditorWratter.IOptions`.
+     * The editor factory we need to include in `CodeEditorWrapper.IOptions`.
      *
      * This is a separate readonly attribute rather than a factory method as we need
      * to pass it around.
@@ -205,8 +207,8 @@ export namespace InputArea {
     /**
      * Construct a `ContentFactory`.
      */
-    constructor(options: ContentFactory.IOptions = {}) {
-      this._editor = options.editorFactory || defaultEditorFactory;
+    constructor(options: ContentFactory.IOptions) {
+      this._editor = options.editorFactory;
     }
 
     /**
@@ -223,7 +225,7 @@ export namespace InputArea {
       return new InputPrompt();
     }
 
-    private _editor: CodeEditor.Factory = null;
+    private _editor: CodeEditor.Factory;
   }
 
   /**
@@ -240,30 +242,12 @@ export namespace InputArea {
        * If this is not passed, a default CodeMirror editor factory
        * will be used.
        */
-      editorFactory?: CodeEditor.Factory;
+      editorFactory: CodeEditor.Factory;
     }
   }
-
-  /**
-   * A function to create the default CodeMirror editor factory.
-   */
-  function _createDefaultEditorFactory(): CodeEditor.Factory {
-    let editorServices = new CodeMirrorEditorFactory();
-    return editorServices.newInlineEditor;
-  }
-
-  /**
-   * The default editor factory singleton based on CodeMirror.
-   */
-  export const defaultEditorFactory: CodeEditor.Factory = _createDefaultEditorFactory();
-
-  /**
-   * The default `ContentFactory` instance.
-   */
-  export const defaultContentFactory = new ContentFactory({});
 }
 
-/******************************************************************************
+/** ****************************************************************************
  * InputPrompt
  ******************************************************************************/
 
@@ -274,7 +258,7 @@ export interface IInputPrompt extends Widget {
   /**
    * The execution count of the prompt.
    */
-  executionCount: string;
+  executionCount: string | null;
 }
 
 /**
@@ -292,10 +276,10 @@ export class InputPrompt extends Widget implements IInputPrompt {
   /**
    * The execution count for the prompt.
    */
-  get executionCount(): string {
+  get executionCount(): string | null {
     return this._executionCount;
   }
-  set executionCount(value: string) {
+  set executionCount(value: string | null) {
     this._executionCount = value;
     if (value === null) {
       this.node.textContent = ' ';
@@ -304,5 +288,5 @@ export class InputPrompt extends Widget implements IInputPrompt {
     }
   }
 
-  private _executionCount: string = null;
+  private _executionCount: string | null = null;
 }

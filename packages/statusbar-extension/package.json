@@ -1,6 +1,6 @@
 {
   "name": "@jupyterlab/statusbar-extension",
-  "version": "2.0.0-alpha.1",
+  "version": "4.3.0-beta.1",
   "description": "JupyterLab - Statusbar Extension",
   "homepage": "https://github.com/jupyterlab/jupyterlab",
   "bugs": {
@@ -12,13 +12,6 @@
   },
   "license": "BSD-3-Clause",
   "author": "Project Jupyter, Richa Gadgil, Takahiro Shimokobe, Declan Kelly",
-  "files": [
-    "lib/**/*.d.ts",
-    "lib/**/*.js.map",
-    "lib/**/*.js",
-    "style/**/*.{css,eot,gif,html,jpg,json,png,svg,woff2,ttf}",
-    "schema/*.json"
-  ],
   "sideEffects": [
     "style/**/*"
   ],
@@ -28,32 +21,32 @@
   "directories": {
     "lib": "lib/"
   },
+  "files": [
+    "lib/**/*.d.ts",
+    "lib/**/*.js.map",
+    "lib/**/*.js",
+    "style/**/*.{css,eot,gif,html,jpg,json,png,svg,woff2,ttf}",
+    "schema/*.json",
+    "style/index.js",
+    "src/**/*.{ts,tsx}"
+  ],
   "scripts": {
     "build": "tsc -b",
-    "clean": "rimraf lib",
-    "docs": "typedoc --options tdoptions.json --theme ../../typedoc-theme src",
-    "prepublishOnly": "npm run build",
+    "clean": "rimraf lib && rimraf tsconfig.tsbuildinfo",
     "watch": "tsc -b --watch"
   },
   "dependencies": {
-    "@jupyterlab/application": "^2.0.0-alpha.1",
-    "@jupyterlab/apputils": "^2.0.0-alpha.1",
-    "@jupyterlab/cells": "^2.0.0-alpha.1",
-    "@jupyterlab/console": "^2.0.0-alpha.1",
-    "@jupyterlab/coreutils": "^4.0.0-alpha.1",
-    "@jupyterlab/docregistry": "^2.0.0-alpha.1",
-    "@jupyterlab/fileeditor": "^2.0.0-alpha.1",
-    "@jupyterlab/mainmenu": "^2.0.0-alpha.1",
-    "@jupyterlab/notebook": "^2.0.0-alpha.1",
-    "@jupyterlab/statusbar": "^2.0.0-alpha.1",
-    "@phosphor/widgets": "^1.9.0"
+    "@jupyterlab/application": "^4.3.0-beta.1",
+    "@jupyterlab/apputils": "^4.4.0-beta.1",
+    "@jupyterlab/settingregistry": "^4.3.0-beta.1",
+    "@jupyterlab/statusbar": "^4.3.0-beta.1",
+    "@jupyterlab/translation": "^4.3.0-beta.1"
   },
   "devDependencies": {
-    "@types/react": "~16.8.18",
-    "@types/react-dom": "^16.8.4",
-    "rimraf": "~2.6.2",
-    "typedoc": "^0.14.2",
-    "typescript": "~3.5.1"
+    "@types/react": "^18.0.26",
+    "@types/react-dom": "^18.0.9",
+    "rimraf": "~5.0.5",
+    "typescript": "~5.1.6"
   },
   "publishConfig": {
     "access": "public"
@@ -61,5 +54,6 @@
   "jupyterlab": {
     "extension": true,
     "schemaDir": "schema"
-  }
+  },
+  "styleModule": "style/index.js"
 }

@@ -8,15 +8,15 @@ import { Printing } from '@jupyterlab/apputils';
 import {
   ABCWidgetFactory,
   DocumentRegistry,
-  IDocumentWidget,
-  DocumentWidget
+  DocumentWidget,
+  IDocumentWidget
 } from '@jupyterlab/docregistry';
 
-import { PromiseDelegate } from '@phosphor/coreutils';
+import { PromiseDelegate } from '@lumino/coreutils';
 
-import { Message } from '@phosphor/messaging';
+import { Message } from '@lumino/messaging';
 
-import { Widget } from '@phosphor/widgets';
+import { Widget } from '@lumino/widgets';
 
 /**
  * The class name added to a imageviewer.
@@ -33,7 +33,7 @@ export class ImageViewer extends Widget implements Printing.IPrintable {
   constructor(context: DocumentRegistry.Context) {
     super();
     this.context = context;
-    this.node.tabIndex = -1;
+    this.node.tabIndex = 0;
     this.addClass(IMAGE_CLASS);
 
     this._img = document.createElement('img');
@@ -46,8 +46,7 @@ export class ImageViewer extends Widget implements Printing.IPrintable {
       if (this.isDisposed) {
         return;
       }
-      const contents = context.contentsModel;
-      this._format = contents.format === 'base64' ? ';base64' : '';
+      const contents = context.contentsModel!;
       this._mimeType = contents.mimetype;
       this._render();
       context.model.contentChanged.connect(this.update, this);
@@ -60,7 +59,7 @@ export class ImageViewer extends Widget implements Printing.IPrintable {
    * Print in iframe.
    */
   [Printing.symbol]() {
-    return () => Printing.printWidget(this);
+    return (): Promise<void> => Printing.printWidget(this);
   }
 
   /**
@@ -101,6 +100,16 @@ export class ImageViewer extends Widget implements Printing.IPrintable {
     }
     this._colorinversion = value;
     this._updateStyle();
+  }
+
+  /**
+   * Dispose of resources held by the image viewer.
+   */
+  dispose(): void {
+    if (this._img.src) {
+      URL.revokeObjectURL(this._img.src || '');
+    }
+    super.dispose();
   }
 
   /**
@@ -174,29 +183,35 @@ export class ImageViewer extends Widget implements Printing.IPrintable {
    * Render the widget content.
    */
   private _render(): void {
-    let context = this.context;
-    let cm = context.contentsModel;
+    const context = this.context;
+    const cm = context.contentsModel;
     if (!cm) {
       return;
     }
+    const oldurl = this._img.src || '';
     let content = context.model.toString();
-    this._img.src = `data:${this._mimeType}${this._format},${content}`;
+    if (cm.format === 'base64') {
+      this._img.src = `data:${this._mimeType};base64,${content}`;
+    } else {
+      const a = new Blob([content], { type: this._mimeType });
+      this._img.src = URL.createObjectURL(a);
+    }
+    URL.revokeObjectURL(oldurl);
   }
 
   /**
    * Update the image CSS style, including the transform and filter.
    */
   private _updateStyle(): void {
-    let [a, b, c, d] = this._matrix;
-    let [tX, tY] = Private.prodVec(this._matrix, [1, 1]);
-    let transform = `matrix(${a}, ${b}, ${c}, ${d}, 0, 0) translate(${
+    const [a, b, c, d] = this._matrix;
+    const [tX, tY] = Private.prodVec(this._matrix, [1, 1]);
+    const transform = `matrix(${a}, ${b}, ${c}, ${d}, 0, 0) translate(${
       tX < 0 ? -100 : 0
     }%, ${tY < 0 ? -100 : 0}%) `;
     this._img.style.transform = `scale(${this._scale}) ${transform}`;
     this._img.style.filter = `invert(${this._colorinversion})`;
   }
 
-  private _format: string;
   private _mimeType: string;
   private _scale = 1;
   private _matrix = [1, 0, 0, 1];

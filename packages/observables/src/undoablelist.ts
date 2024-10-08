@@ -1,10 +1,7 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import { JSONValue } from '@phosphor/coreutils';
-
-import { each } from '@phosphor/algorithm';
-
+import { JSONValue } from '@lumino/coreutils';
 import { IObservableList, ObservableList } from './observablelist';
 
 /**
@@ -69,8 +66,10 @@ export interface IObservableUndoableList<T> extends IObservableList<T> {
 /**
  * A concrete implementation of an observable undoable list.
  */
-export class ObservableUndoableList<T> extends ObservableList<T>
-  implements IObservableUndoableList<T> {
+export class ObservableUndoableList<T>
+  extends ObservableList<T>
+  implements IObservableUndoableList<T>
+{
   /**
    * Construct a new undoable observable list.
    */
@@ -124,9 +123,9 @@ export class ObservableUndoableList<T> extends ObservableList<T>
     if (!this.canUndo) {
       return;
     }
-    let changes = this._stack[this._index];
+    const changes = this._stack[this._index];
     this._isUndoable = false;
-    for (let change of changes.reverse()) {
+    for (const change of changes.reverse()) {
       this._undoChange(change);
     }
     this._isUndoable = true;
@@ -141,9 +140,9 @@ export class ObservableUndoableList<T> extends ObservableList<T>
       return;
     }
     this._index++;
-    let changes = this._stack[this._index];
+    const changes = this._stack[this._index];
     this._isUndoable = false;
-    for (let change of changes) {
+    for (const change of changes) {
       this._redoChange(change);
     }
     this._isUndoable = true;
@@ -172,7 +171,7 @@ export class ObservableUndoableList<T> extends ObservableList<T>
       this._stack = this._stack.slice(0, this._index + 1);
     }
     // Copy the change.
-    let evt = this._copyChange(change);
+    const evt = this._copyChange(change);
     // Put the change in the stack.
     if (this._stack[this._index + 1]) {
       this._stack[this._index + 1].push(evt);
@@ -192,24 +191,24 @@ export class ObservableUndoableList<T> extends ObservableList<T>
    */
   private _undoChange(change: IObservableList.IChangedArgs<JSONValue>): void {
     let index = 0;
-    let serializer = this._serializer;
+    const serializer = this._serializer;
     switch (change.type) {
       case 'add':
-        each(change.newValues, () => {
+        for (let length = change.newValues.length; length > 0; length--) {
           this.remove(change.newIndex);
-        });
+        }
         break;
       case 'set':
         index = change.oldIndex;
-        each(change.oldValues, value => {
+        for (const value of change.oldValues) {
           this.set(index++, serializer.fromJSON(value));
-        });
+        }
         break;
       case 'remove':
         index = change.oldIndex;
-        each(change.oldValues, value => {
+        for (const value of change.oldValues) {
           this.insert(index++, serializer.fromJSON(value));
-        });
+        }
         break;
       case 'move':
         this.move(change.newIndex, change.oldIndex);
@@ -224,24 +223,24 @@ export class ObservableUndoableList<T> extends ObservableList<T>
    */
   private _redoChange(change: IObservableList.IChangedArgs<JSONValue>): void {
     let index = 0;
-    let serializer = this._serializer;
+    const serializer = this._serializer;
     switch (change.type) {
       case 'add':
         index = change.newIndex;
-        each(change.newValues, value => {
+        for (const value of change.newValues) {
           this.insert(index++, serializer.fromJSON(value));
-        });
+        }
         break;
       case 'set':
         index = change.newIndex;
-        each(change.newValues, value => {
+        for (const value of change.newValues) {
           this.set(change.newIndex++, serializer.fromJSON(value));
-        });
+        }
         break;
       case 'remove':
-        each(change.oldValues, () => {
+        for (let length = change.oldValues.length; length > 0; length--) {
           this.remove(change.oldIndex);
-        });
+        }
         break;
       case 'move':
         this.move(change.oldIndex, change.newIndex);
@@ -257,14 +256,14 @@ export class ObservableUndoableList<T> extends ObservableList<T>
   private _copyChange(
     change: IObservableList.IChangedArgs<T>
   ): IObservableList.IChangedArgs<JSONValue> {
-    let oldValues: JSONValue[] = [];
-    each(change.oldValues, value => {
+    const oldValues: JSONValue[] = [];
+    for (const value of change.oldValues) {
       oldValues.push(this._serializer.toJSON(value));
-    });
-    let newValues: JSONValue[] = [];
-    each(change.newValues, value => {
+    }
+    const newValues: JSONValue[] = [];
+    for (const value of change.newValues) {
       newValues.push(this._serializer.toJSON(value));
-    });
+    }
     return {
       type: change.type,
       oldIndex: change.oldIndex,
@@ -290,7 +289,8 @@ export namespace ObservableUndoableList {
    * A default, identity serializer.
    */
   export class IdentitySerializer<T extends JSONValue>
-    implements ISerializer<T> {
+    implements ISerializer<T>
+  {
     /**
      * Identity serialize.
      */

@@ -1,13 +1,10 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import { Widget } from '@phosphor/widgets';
-
-import { Token } from '@phosphor/coreutils';
-
 import { IWidgetTracker, MainAreaWidget } from '@jupyterlab/apputils';
-
-import { TerminalSession } from '@jupyterlab/services';
+import { Terminal } from '@jupyterlab/services';
+import { Token } from '@lumino/coreutils';
+import { Widget } from '@lumino/widgets';
 
 /**
  * A class that tracks editor widgets.
@@ -15,14 +12,15 @@ import { TerminalSession } from '@jupyterlab/services';
 export interface ITerminalTracker
   extends IWidgetTracker<MainAreaWidget<ITerminal.ITerminal>> {}
 
-/* tslint:disable */
 /**
  * The editor tracker token.
  */
 export const ITerminalTracker = new Token<ITerminalTracker>(
-  '@jupyterlab/terminal:ITerminalTracker'
+  '@jupyterlab/terminal:ITerminalTracker',
+  `A widget tracker for terminals.
+  Use this if you want to be able to iterate over and interact with terminals
+  created by the application.`
 );
-/* tslint:enable */
 
 /**
  * The namespace for terminals. Separated from the widget so it can be lazy
@@ -33,7 +31,7 @@ export namespace ITerminal {
     /**
      * The terminal session associated with the widget.
      */
-    session: TerminalSession.ISession;
+    session: Terminal.ITerminalConnection;
 
     /**
      * Get a config option for the terminal.
@@ -49,6 +47,21 @@ export namespace ITerminal {
      * Refresh the terminal session.
      */
     refresh(): Promise<void>;
+
+    /**
+     * Check if terminal has any text selected.
+     */
+    hasSelection(): boolean;
+
+    /**
+     * Paste text into terminal.
+     */
+    paste(data: string): void;
+
+    /**
+     * Get selected text from terminal.
+     */
+    getSelection(): string | null;
   }
   /**
    * Options for the terminal widget.
@@ -57,7 +70,7 @@ export namespace ITerminal {
     /**
      * The font family used to render text.
      */
-    fontFamily: string | null;
+    fontFamily?: string;
 
     /**
      * The font size of the terminal in pixels.
@@ -67,7 +80,7 @@ export namespace ITerminal {
     /**
      * The line height used to render text.
      */
-    lineHeight: number | null;
+    lineHeight?: number;
 
     /**
      * The theme of the terminal.
@@ -78,7 +91,7 @@ export namespace ITerminal {
      * The amount of buffer scrollback to be used
      * with the terminal
      */
-    scrollback: number | null;
+    scrollback?: number;
 
     /**
      * Whether to shut down the session when closing a terminal or not.
@@ -86,7 +99,12 @@ export namespace ITerminal {
     shutdownOnClose: boolean;
 
     /**
-     * Whether to blink the cursor.  Can only be set at startup.
+     * Whether to close the widget when exiting a terminal or not.
+     */
+    closeOnExit: boolean;
+
+    /**
+     * Whether to blink the cursor. Can only be set at startup.
      */
     cursorBlink: boolean;
 
@@ -106,6 +124,16 @@ export namespace ITerminal {
      * This setting has no effect on macOS, where Cmd+V is available.
      */
     pasteWithCtrlV: boolean;
+
+    /**
+     * Whether to auto-fit the terminal to its host element size.
+     */
+    autoFit?: boolean;
+
+    /**
+     * Treat option as meta key on macOS.
+     */
+    macOptionIsMeta?: boolean;
   }
 
   /**
@@ -118,10 +146,13 @@ export namespace ITerminal {
     lineHeight: 1.0,
     scrollback: 1000,
     shutdownOnClose: false,
+    closeOnExit: true,
     cursorBlink: true,
     initialCommand: '',
     screenReaderMode: false, // False by default, can cause scrollbar mouse interaction issues.
-    pasteWithCtrlV: true
+    pasteWithCtrlV: true,
+    autoFit: true,
+    macOptionIsMeta: false
   };
 
   /**
@@ -137,6 +168,7 @@ export namespace ITerminal {
     background: string;
     cursor: string;
     cursorAccent: string;
-    selection: string;
+    selectionBackground: string;
+    selectionInactiveBackground: string;
   }
 }

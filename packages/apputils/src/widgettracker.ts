@@ -1,13 +1,10 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import { IRestorable, RestorablePool } from '@jupyterlab/coreutils';
-
-import { IDisposable } from '@phosphor/disposable';
-
-import { ISignal, Signal } from '@phosphor/signaling';
-
-import { FocusTracker, Widget } from '@phosphor/widgets';
+import { IRestorable, RestorablePool } from '@jupyterlab/statedb';
+import { IDisposable } from '@lumino/disposable';
+import { ISignal, Signal } from '@lumino/signaling';
+import { FocusTracker, Widget } from '@lumino/widgets';
 
 /**
  * A tracker that tracks widgets.
@@ -63,7 +60,7 @@ export interface IWidgetTracker<T extends Widget = Widget> extends IDisposable {
   /**
    * Find the first instance in the tracker that satisfies a filter function.
    *
-   * @param - fn The filter function to call on each instance.
+   * @param fn The filter function to call on each instance.
    *
    * #### Notes
    * If nothing is found, the value returned is `undefined`.
@@ -113,7 +110,8 @@ export interface IWidgetTracker<T extends Widget = Widget> extends IDisposable {
  * internally by plugins to restore state as well.
  */
 export class WidgetTracker<T extends Widget = Widget>
-  implements IWidgetTracker<T>, IRestorable<T> {
+  implements IWidgetTracker<T>, IRestorable<T>
+{
   /**
    * Create a new widget tracker.
    *
@@ -142,6 +140,7 @@ export class WidgetTracker<T extends Widget = Widget>
         pool.current = focus.currentWidget;
         return;
       }
+
       this.onCurrentChanged(widget);
       this._currentChanged.emit(widget);
     }, this);
@@ -178,7 +177,11 @@ export class WidgetTracker<T extends Widget = Widget>
    * A promise resolved when the tracker has been restored.
    */
   get restored(): Promise<void> {
-    return this._pool.restored;
+    if (this._deferred) {
+      return Promise.resolve();
+    } else {
+      return this._pool.restored;
+    }
   }
 
   /**
@@ -216,11 +219,16 @@ export class WidgetTracker<T extends Widget = Widget>
    * the tracker can be checked with the `has()` method. The promise this method
    * returns resolves after the widget has been added and saved to an underlying
    * restoration connector, if one is available.
+   *
+   * The newly added widget becomes the current widget unless the focus tracker
+   * already had a focused widget.
    */
   async add(widget: T): Promise<void> {
     this._focusTracker.add(widget);
     await this._pool.add(widget);
-    this._pool.current = widget;
+    if (!this._focusTracker.activeWidget) {
+      this._pool.current = widget;
+    }
   }
 
   /**
@@ -246,7 +254,7 @@ export class WidgetTracker<T extends Widget = Widget>
   /**
    * Find the first widget in the tracker that satisfies a filter function.
    *
-   * @param - fn The filter function to call on each widget.
+   * @param fn The filter function to call on each widget.
    *
    * #### Notes
    * If no widget is found, the value returned is `undefined`.
@@ -313,8 +321,30 @@ export class WidgetTracker<T extends Widget = Widget>
    * This function should not typically be invoked by client code.
    * Its primary use case is to be invoked by a restorer.
    */
-  async restore(options: IRestorable.IOptions<T>): Promise<any> {
-    return this._pool.restore(options);
+  async restore(options?: IRestorable.IOptions<T>): Promise<any> {
+    const deferred = this._deferred;
+    if (deferred) {
+      this._deferred = null;
+      return this._pool.restore(deferred);
+    }
+    if (options) {
+      return this._pool.restore(options);
+    }
+    console.warn('No options provided to restore the tracker.');
+  }
+
+  /**
+   * Save the restore options for this tracker, but do not restore yet.
+   *
+   * @param options - The configuration options that describe restoration.
+   *
+   * ### Notes
+   * This function is useful when starting the shell in 'single-document' mode,
+   * to avoid restoring all useless widgets. It should not ordinarily be called
+   * by client code.
+   */
+  defer(options: IRestorable.IOptions<T>): void {
+    this._deferred = options;
   }
 
   /**
@@ -336,7 +366,8 @@ export class WidgetTracker<T extends Widget = Widget>
     /* no-op */
   }
 
-  private _currentChanged = new Signal<this, T>(this);
+  private _currentChanged = new Signal<this, T | null>(this);
+  private _deferred: IRestorable.IOptions<T> | null = null;
   private _focusTracker: FocusTracker<T>;
   private _pool: RestorablePool<T>;
   private _isDisposed = false;

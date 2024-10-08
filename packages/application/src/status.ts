@@ -1,61 +1,10 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import { Token } from '@phosphor/coreutils';
-
-import { DisposableDelegate, IDisposable } from '@phosphor/disposable';
-
-import { ISignal, Signal } from '@phosphor/signaling';
-
+import { DisposableDelegate, IDisposable } from '@lumino/disposable';
+import { ISignal, Signal } from '@lumino/signaling';
 import { JupyterFrontEnd } from './frontend';
-
-/* tslint:disable */
-/**
- * The application status token.
- */
-export const ILabStatus = new Token<ILabStatus>(
-  '@jupyterlab/application:ILabStatus'
-);
-/* tslint:enable */
-
-/**
- * An interface for JupyterLab-like application status functionality.
- */
-export interface ILabStatus {
-  /**
-   * A signal for when application changes its busy status.
-   */
-  readonly busySignal: ISignal<JupyterFrontEnd, boolean>;
-
-  /**
-   * A signal for when application changes its dirty status.
-   */
-  readonly dirtySignal: ISignal<JupyterFrontEnd, boolean>;
-
-  /**
-   * Whether the application is busy.
-   */
-  readonly isBusy: boolean;
-
-  /**
-   * Whether the application is dirty.
-   */
-  readonly isDirty: boolean;
-
-  /**
-   * Set the application state to busy.
-   *
-   * @returns A disposable used to clear the busy state for the caller.
-   */
-  setBusy(): IDisposable;
-
-  /**
-   * Set the application state to dirty.
-   *
-   * @returns A disposable used to clear the dirty state for the caller.
-   */
-  setDirty(): IDisposable;
-}
+import { ILabStatus } from './tokens';
 
 /**
  * The application status signals and flags class.
@@ -64,7 +13,7 @@ export class LabStatus implements ILabStatus {
   /**
    * Construct a new  status object.
    */
-  constructor(app: JupyterFrontEnd) {
+  constructor(app: JupyterFrontEnd<any, any>) {
     this._busySignal = new Signal(app);
     this._dirtySignal = new Signal(app);
   }

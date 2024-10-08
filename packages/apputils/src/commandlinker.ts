@@ -1,15 +1,12 @@
-/*-----------------------------------------------------------------------------
+/* -----------------------------------------------------------------------------
 | Copyright (c) Jupyter Development Team.
 | Distributed under the terms of the Modified BSD License.
 |----------------------------------------------------------------------------*/
 
-import { JSONExt, JSONObject } from '@phosphor/coreutils';
-
-import { IDisposable } from '@phosphor/disposable';
-
-import { CommandRegistry } from '@phosphor/commands';
-
-import { ElementDataset } from '@phosphor/virtualdom';
+import { CommandRegistry } from '@lumino/commands';
+import { JSONExt, ReadonlyPartialJSONObject } from '@lumino/coreutils';
+import { IDisposable } from '@lumino/disposable';
+import { ElementDataset } from '@lumino/virtualdom';
 
 /**
  * The command data attribute added to nodes that are connected.
@@ -73,7 +70,7 @@ export class CommandLinker implements IDisposable {
   connectNode(
     node: HTMLElement,
     command: string,
-    args?: JSONObject
+    args?: ReadonlyPartialJSONObject
   ): HTMLElement {
     node.setAttribute(`data-${COMMAND_ATTR}`, command);
     if (args !== void 0) {
@@ -154,7 +151,10 @@ export class CommandLinker implements IDisposable {
    * }, 'some text');
    * ```
    */
-  populateVNodeDataset(command: string, args?: JSONObject): ElementDataset {
+  populateVNodeDataset(
+    command: string,
+    args?: ReadonlyPartialJSONObject
+  ): ElementDataset {
     let dataset: ElementDataset;
     if (args !== void 0) {
       dataset = { [ARGS_ATTR]: JSON.stringify(args), [COMMAND_ATTR]: command };
@@ -173,11 +173,11 @@ export class CommandLinker implements IDisposable {
     while (target && target.parentElement) {
       if (target.hasAttribute(`data-${COMMAND_ATTR}`)) {
         event.preventDefault();
-        let command = target.getAttribute(`data-${COMMAND_ATTR}`);
+        const command = target.getAttribute(`data-${COMMAND_ATTR}`);
         if (!command) {
           return;
         }
-        let argsValue = target.getAttribute(`data-${ARGS_ATTR}`);
+        const argsValue = target.getAttribute(`data-${ARGS_ATTR}`);
         let args = JSONExt.emptyObject;
         if (argsValue) {
           args = JSON.parse(argsValue);

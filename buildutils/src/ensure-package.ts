@@ -1,10 +1,11 @@
-/*-----------------------------------------------------------------------------
+/* -----------------------------------------------------------------------------
 | Copyright (c) Jupyter Development Team.
 | Distributed under the terms of the Modified BSD License.
 |----------------------------------------------------------------------------*/
 
 import * as fs from 'fs-extra';
 import * as glob from 'glob';
+import * as minimatch from 'minimatch';
 import * as path from 'path';
 import * as prettier from 'prettier';
 import * as ts from 'typescript';
@@ -21,17 +22,13 @@ const HEADER_TEMPLATE = `
 `;
 
 const ICON_IMPORTS_TEMPLATE = `
-import { Icon } from './interfaces';
+import { LabIcon } from './labicon';
 
 // icon svg import statements
-{{iconImportStatements}}
+{{svgImportStatements}}
 
-// defaultIcons definition
-export namespace IconImports {
-  export const defaultIcons: ReadonlyArray<Icon.IModel> = [
-    {{iconModelDeclarations}}
-  ];
-}
+// LabIcon instance construction
+{{labiconConstructions}}
 `;
 
 const ICON_CSS_CLASSES_TEMPLATE = `
@@ -60,16 +57,23 @@ const ICON_CSS_CLASSES_TEMPLATE = `
 export async function ensurePackage(
   options: IEnsurePackageOptions
 ): Promise<string[]> {
-  let { data, pkgPath } = options;
-  let deps: { [key: string]: string } = data.dependencies || {};
-  let devDeps: { [key: string]: string } = data.devDependencies || {};
-  let seenDeps = options.depCache || {};
-  let missing = options.missing || [];
-  let unused = options.unused || [];
-  let messages: string[] = [];
-  let locals = options.locals || {};
-  let cssImports = options.cssImports || [];
-  let differentVersions = options.differentVersions || [];
+  const { data, pkgPath } = options;
+  const deps: { [key: string]: string } = data.dependencies || {};
+  const devDeps: { [key: string]: string } = data.devDependencies || {};
+  const seenDeps = options.depCache || {};
+  const missing = options.missing || [];
+  const unused = options.unused || [];
+  const messages: string[] = [];
+  const locals = options.locals || {};
+  const cssImports = options.cssImports || [];
+  const cssModuleImports = options.cssModuleImports || [];
+  const differentVersions = options.differentVersions || [];
+  const backwardVersions = options.backwardVersions ?? {};
+  const isPrivate = data.private == true;
+
+  const hasBackwardCompatibilities = Object.keys(backwardVersions).includes(
+    data.name
+  );
 
   // Verify dependencies are consistent.
   let promises = Object.keys(deps).map(async name => {
@@ -81,9 +85,50 @@ export async function ensurePackage(
       seenDeps[name] = await getDependency(name);
     }
     if (deps[name] !== seenDeps[name]) {
-      messages.push(`Updated dependency: ${name}@${seenDeps[name]}`);
+      const oneOf =
+        deps[name].includes('||') &&
+        deps[name]
+          .split(/\|\|/)
+          .map(v => v.trim())
+          .includes(seenDeps[name]);
+
+      if (!oneOf) {
+        if (
+          hasBackwardCompatibilities &&
+          Object.keys(backwardVersions[data.name]).includes(name)
+        ) {
+          messages.push(
+            `Updated dependency: ${name}@${
+              backwardVersions[data.name][name]
+            } || ${seenDeps[name]}`
+          );
+          deps[name] = `${backwardVersions[data.name][name]} || ${
+            seenDeps[name]
+          }`;
+        } else {
+          messages.push(`Updated dependency: ${name}@${seenDeps[name]}`);
+          deps[name] = seenDeps[name];
+        }
+      }
     }
-    deps[name] = seenDeps[name];
+
+    if (
+      hasBackwardCompatibilities &&
+      Object.keys(backwardVersions[data.name]).includes(name)
+    ) {
+      const oneOf = deps[name]
+        .split(/\|\|/)
+        .map(v => v.trim())
+        .includes(backwardVersions[data.name][name]);
+      if (!oneOf) {
+        messages.push(
+          `Updated backward dependency: ${name}@${
+            backwardVersions[data.name][name]
+          } || ${deps[name]}`
+        );
+        deps[name] = `${backwardVersions[data.name][name]} || ${deps[name]}`;
+      }
+    }
   });
 
   await Promise.all(promises);
@@ -98,9 +143,17 @@ export async function ensurePackage(
       seenDeps[name] = await getDependency(name);
     }
     if (devDeps[name] !== seenDeps[name]) {
-      messages.push(`Updated devDependency: ${name}@${seenDeps[name]}`);
+      const oneOf =
+        devDeps[name].includes('||') &&
+        devDeps[name]
+          .split(/\|\|/)
+          .map(v => v.trim())
+          .includes(seenDeps[name]);
+      if (!oneOf) {
+        messages.push(`Updated devDependency: ${name}@${seenDeps[name]}`);
+        devDeps[name] = seenDeps[name];
+      }
     }
-    devDeps[name] = seenDeps[name];
   });
 
   await Promise.all(promises);
@@ -110,43 +163,67 @@ export async function ensurePackage(
   filenames = glob.sync(path.join(pkgPath, 'src/*.ts*'));
   filenames = filenames.concat(glob.sync(path.join(pkgPath, 'src/**/*.ts*')));
 
-  if (!fs.existsSync(path.join(pkgPath, 'tsconfig.json'))) {
-    if (utils.writePackageData(path.join(pkgPath, 'package.json'), data)) {
-      messages.push('Updated package.json');
+  const tsConfigPath = path.join(pkgPath, 'tsconfig.json');
+  const usesTS = fs.existsSync(tsConfigPath);
+
+  // Make sure typedoc config files are consistent
+  if (fs.existsSync(path.join(pkgPath, 'typedoc.json'))) {
+    let entryPoint = fs.existsSync(path.join(pkgPath, 'src/index.ts'))
+      ? 'src/index.ts'
+      : fs.existsSync(path.join(pkgPath, 'src/index.tsx'))
+      ? 'src/index.tsx'
+      : null;
+    if (entryPoint) {
+      utils.writeJSONFile(path.join(pkgPath, 'typedoc.json'), {
+        extends: ['../../typedoc.base.json'],
+        entryPoints: [entryPoint],
+        name: data.name.replace(/^@jupyterlab\//, '')
+      });
     }
-    return messages;
   }
 
   let imports: string[] = [];
 
   // Extract all of the imports from the TypeScript files.
   filenames.forEach(fileName => {
-    let sourceFile = ts.createSourceFile(
+    const sourceFile = ts.createSourceFile(
       fileName,
       fs.readFileSync(fileName).toString(),
       (ts.ScriptTarget as any).ES6,
-      /*setParentNodes */ true
+      /* setParentNodes */ true
     );
     imports = imports.concat(getImports(sourceFile));
   });
 
   // Make sure we are not importing CSS in a core package.
-  if (data.name.indexOf('example') === -1) {
+  if (
+    data.name.indexOf('example') === -1 &&
+    data.name !== '@jupyterlab/codemirror'
+  ) {
     imports.forEach(importStr => {
-      if (importStr.indexOf('.css') !== -1) {
-        messages.push('CSS imports are not allowed source files');
+      if (
+        importStr.indexOf('.css') !== -1 &&
+        importStr.indexOf('.raw.css') === -1
+      ) {
+        messages.push(
+          'CSS imports are not allowed source files unless using `.raw.css` extension'
+        );
       }
     });
   }
 
-  let names: string[] = Array.from(new Set(imports)).sort();
-  names = names.map(function(name) {
-    let parts = name.split('/');
-    if (name.indexOf('@') === 0) {
-      return parts[0] + '/' + parts[1];
-    }
-    return parts[0];
-  });
+  const names = Array.from(new Set(imports))
+    .sort()
+    .map(name => {
+      const parts = name.split('/');
+      if (name.indexOf('@') === 0) {
+        return parts[0] + '/' + parts[1];
+      }
+      if (parts[0].indexOf('!') !== -1) {
+        parts[0] = parts[0].slice(parts[0].lastIndexOf('!') + 1);
+      }
+      return parts[0];
+    });
 
   // Look for imports with no dependencies.
   promises = names.map(async name => {
@@ -167,58 +244,88 @@ export async function ensurePackage(
 
   await Promise.all(promises);
 
-  // Template the CSS index file.
-  if (cssImports && fs.existsSync(path.join(pkgPath, 'style/base.css'))) {
-    const funcName = 'ensurePackage';
-    let cssIndexContents = utils.fromTemplate(
-      HEADER_TEMPLATE,
-      { funcName },
-      { end: '' }
-    );
-    cssImports.forEach(cssImport => {
-      cssIndexContents += `\n@import url('~${cssImport}');`;
-    });
-    cssIndexContents += "\n\n@import url('./base.css');\n";
+  if (usesTS) {
+    if (
+      cssImports.length > 0 ||
+      fs.existsSync(path.join(pkgPath, 'style/base.css'))
+    ) {
+      const funcName = 'ensurePackage';
 
-    // write out cssIndexContents, if needed
-    const cssIndexPath = path.join(pkgPath, 'style/index.css');
-    messages.push(...ensureFile(cssIndexPath, cssIndexContents, false));
-  }
+      // Template the CSS index file.
+      const cssIndexContents = [
+        utils.fromTemplate(HEADER_TEMPLATE, { funcName }, { end: '' }),
+        ...cssImports.map(x => `@import url('~${x}');`)
+      ];
+      if (fs.existsSync(path.join(pkgPath, 'style/base.css'))) {
+        cssIndexContents.push("@import url('./base.css');");
+      }
+      // Add final line return
+      cssIndexContents.push('');
 
-  // Look for unused packages
-  Object.keys(deps).forEach(name => {
-    if (options.noUnused === false) {
-      return;
-    }
-    if (unused.indexOf(name) !== -1) {
-      return;
-    }
-    const isTest = data.name.indexOf('test') !== -1;
-    if (isTest) {
-      const testLibs = ['jest', 'ts-jest', '@jupyterlab/testutils'];
-      if (testLibs.indexOf(name) !== -1) {
-        return;
+      // write out cssIndexContents, if needed
+      const cssIndexPath = path.join(pkgPath, 'style/index.css');
+      if (!fs.existsSync(cssIndexPath)) {
+        fs.ensureFileSync(cssIndexPath);
+      }
+      messages.push(
+        ...(await ensureFile(cssIndexPath, cssIndexContents.join('\n'), false))
+      );
+
+      // Template the style module index file.
+      const jsIndexContents = [
+        utils.fromTemplate(HEADER_TEMPLATE, { funcName }, { end: '' }),
+        ...cssModuleImports.map(x => `import '${x}';`),
+        ''
+      ];
+      if (fs.existsSync(path.join(pkgPath, 'style/base.css'))) {
+        jsIndexContents.push("import './base.css';\n");
+      }
+
+      // write out jsIndexContents, if needed
+      const jsIndexPath = path.join(pkgPath, 'style/index.js');
+      if (!fs.existsSync(jsIndexPath)) {
+        fs.ensureFileSync(jsIndexPath);
+      }
+      messages.push(
+        ...(await ensureFile(jsIndexPath, jsIndexContents.join('\n'), false))
+      );
+    } else {
+      if (
+        fs.existsSync(path.join(pkgPath, 'style')) &&
+        fs
+          .readdirSync(path.join(pkgPath, 'style'))
+          .filter(f => !['index.css', 'index.js'].includes(f)).length === 0
+      ) {
+        fs.removeSync(path.join(pkgPath, 'style'));
       }
     }
-    if (names.indexOf(name) === -1) {
-      let version = data.dependencies[name];
-      messages.push(
-        `Unused dependency: ${name}@${version}: remove or add to list of known unused dependencies for this package`
-      );
-    }
-  });
 
-  // Handle typedoc config output.
-  const tdOptionsPath = path.join(pkgPath, 'tdoptions.json');
-  if (fs.existsSync(tdOptionsPath)) {
-    const tdConfigData = utils.readJSONFile(tdOptionsPath);
-    const pkgDirName = pkgPath.split('/').pop();
-    tdConfigData['out'] = `../../docs/api/${pkgDirName}`;
-    utils.writeJSONFile(tdOptionsPath, tdConfigData);
+    // Look for unused packages
+    Object.keys(deps).forEach(name => {
+      if (options.noUnused === false) {
+        return;
+      }
+      if (unused.indexOf(name) !== -1) {
+        return;
+      }
+      const isTest = data.name.indexOf('test') !== -1;
+      if (isTest) {
+        const testLibs = ['jest', 'ts-jest', '@jupyterlab/testing'];
+        if (testLibs.indexOf(name) !== -1) {
+          return;
+        }
+      }
+      if (names.indexOf(name) === -1) {
+        const version = data.dependencies[name];
+        messages.push(
+          `Unused dependency: ${name}@${version}: remove or add to list of known unused dependencies for this package`
+        );
+      }
+    });
   }
 
   // Handle references.
-  let references: { [key: string]: string } = Object.create(null);
+  const references: { [key: string]: string } = Object.create(null);
   Object.keys(deps).forEach(name => {
     if (!(name in locals)) {
       return;
@@ -227,20 +334,66 @@ export async function ensurePackage(
     if (!fs.existsSync(path.join(target, 'tsconfig.json'))) {
       return;
     }
-    let ref = path.relative(pkgPath, locals[name]);
+    const ref = path.relative(pkgPath, locals[name]);
     references[name] = ref.split(path.sep).join('/');
   });
+
   if (
+    usesTS &&
     data.name.indexOf('example-') === -1 &&
     Object.keys(references).length > 0
   ) {
-    const tsConfigPath = path.join(pkgPath, 'tsconfig.json');
     const tsConfigData = utils.readJSONFile(tsConfigPath);
     tsConfigData.references = [];
     Object.keys(references).forEach(name => {
       tsConfigData.references.push({ path: references[name] });
     });
     utils.writeJSONFile(tsConfigPath, tsConfigData);
+  }
+
+  // Inherit from the base tsconfig.
+  if (usesTS) {
+    const tsConfigData = utils.readJSONFile(tsConfigPath);
+    tsConfigData.references = [];
+    Object.keys(references).forEach(name => {
+      tsConfigData.references.push({ path: references[name] });
+    });
+    let prefix = '';
+    let dirName = pkgPath;
+    while (!fs.existsSync(path.join(dirName, 'tsconfigbase.json'))) {
+      dirName = path.dirname(dirName);
+      prefix += '../';
+    }
+    tsConfigData.extends = path.posix.join(prefix, 'tsconfigbase');
+    utils.writeJSONFile(tsConfigPath, tsConfigData);
+  }
+
+  // Handle references in tsconfig.test.json if it exists
+  const tsConfigTestPath = path.join(pkgPath, 'tsconfig.test.json');
+  if (fs.existsSync(tsConfigTestPath)) {
+    const testReferences: { [key: string]: string } = { ...references };
+
+    // Add a reference to self to build the local package as well.
+    testReferences['.'] = '.';
+
+    Object.keys(devDeps).forEach(name => {
+      if (!(name in locals)) {
+        return;
+      }
+      const target = locals[name];
+      if (!fs.existsSync(path.join(target, 'tsconfig.json'))) {
+        return;
+      }
+      const ref = path.relative(pkgPath, locals[name]);
+      testReferences[name] = ref.split(path.sep).join('/');
+    });
+
+    const tsConfigTestData = utils.readJSONFile(tsConfigTestPath);
+    tsConfigTestData.references = [];
+    Object.keys(testReferences).forEach(name => {
+      tsConfigTestData.references.push({ path: testReferences[name] });
+    });
+    utils.writeJSONFile(tsConfigTestPath, tsConfigTestData);
   }
 
   // Get a list of all the published files.
@@ -260,40 +413,204 @@ export async function ensurePackage(
   const schemas = glob.sync(
     path.join(pkgPath, schemaDir || 'schema', '*.json')
   );
-  if (schemaDir && !schemas.length) {
+  if (schemaDir && !schemas.length && pkgPath.indexOf('examples') == -1) {
     messages.push(`No schemas found in ${path.join(pkgPath, schemaDir)}.`);
   } else if (!schemaDir && schemas.length) {
     messages.push(`Schemas found, but no schema indicated in ${pkgPath}`);
   }
-  for (let schema of schemas) {
-    if (!published.has(schema)) {
+  for (const schema of schemas) {
+    if (!published.has(schema) && !isPrivate) {
       messages.push(`Schema ${schema} not published in ${pkgPath}`);
     }
   }
 
   // Ensure that the `style` directories match what is in the `package.json`
   const styles = glob.sync(path.join(pkgPath, 'style', '**/*.*'));
-  for (let style of styles) {
-    if (!published.has(style)) {
-      messages.push(`Style file ${style} not published in ${pkgPath}`);
+  const styleIndex: { [key: string]: string } = {};
+  if (styles.length && usesTS) {
+    // If there is no theme path, the style/styleModule must be defined
+    if (!data.jupyterlab?.themePath) {
+      if (data.style === undefined) {
+        data.style = 'style/index.css';
+      }
+      if (data.styleModule === undefined) {
+        data.styleModule = 'style/index.js';
+      }
     }
+
+    // If the theme path is given, make sure it exists.
+    if (data.jupyterlab?.themePath) {
+      styleIndex[path.join(pkgPath, data.jupyterlab.themePath)] =
+        data.jupyterlab.themePath;
+      if (!fs.existsSync(path.join(pkgPath, data.jupyterlab.themePath))) {
+        messages.push(
+          `Theme file from .jupyterlab.themePath package.json key (${data.jupyterlab.themePath}) does not exist`
+        );
+      }
+    }
+
+    // If the style path is given, make sure it exists.
+    if (data.style) {
+      styleIndex[path.join(pkgPath, data.style)] = data.style;
+      if (!fs.existsSync(path.join(pkgPath, data.style))) {
+        messages.push(
+          `Style file from .style package.json key (${data.style}) does not exist`
+        );
+      }
+    }
+
+    // If the styleModule path is given, make sure it exists.
+    if (data.styleModule) {
+      styleIndex[path.join(pkgPath, data.styleModule)] = data.styleModule;
+      if (!fs.existsSync(path.join(pkgPath, data.styleModule))) {
+        messages.push(
+          `Style module file from .styleModule package.json key (${data.styleModule}) does not exist`
+        );
+      }
+    }
+  } else {
+    // Delete the style field
+    delete data.style;
+    delete data.styleModule;
+    delete data.jupyterlab?.themePath;
   }
 
-  // If we have styles, ensure that 'style' field is declared
-  if (styles.length > 0) {
-    if (data.style === undefined) {
-      data.style = 'style/index.css';
+  for (const style of styles) {
+    if (!published.has(style)) {
+      // Automatically add the style index files
+      if (data.files !== undefined && styleIndex[style] !== undefined) {
+        data.files.push(styleIndex[style]);
+      } else if (!isPrivate) {
+        messages.push(`Style file ${style} not published in ${pkgPath}`);
+      }
     }
   }
 
   // Ensure that sideEffects are declared, and that any styles are covered
-  if (styles.length > 0) {
+  if (styles.length > 0 && !isPrivate) {
     if (data.sideEffects === undefined) {
       messages.push(
         `Side effects not declared in ${pkgPath}, and styles are present.`
       );
     } else if (data.sideEffects === false) {
       messages.push(`Style files not included in sideEffects in ${pkgPath}`);
+    } else if (data.sideEffects !== true) {
+      // Check to see if all .js and .css style files are listed in sideEffects
+      const sideEffects = new Set<string>(
+        data.sideEffects
+          ? data.sideEffects.reduce((acc: string[], curr: string) => {
+              return acc.concat(glob.sync(path.join(pkgPath, curr)));
+            }, [])
+          : []
+      );
+      for (const style of styles) {
+        let ext = path.extname(style);
+        if (['.js', '.css'].includes(ext) && !sideEffects.has(style)) {
+          // If it is the data.style or corresponding js file, just add it to sideEffects
+          if (styleIndex[style] !== undefined) {
+            data.sideEffects.push(styleIndex[style]);
+          } else {
+            messages.push(
+              `Style file ${style} not covered by sideEffects globs in ${pkgPath}`
+            );
+          }
+        }
+      }
+    }
+  }
+
+  // Ensure style and lib are included in files metadata.
+  const filePatterns: string[] = data.files || [];
+  const ignoreDirs: string[] = ['.ipynb_checkpoints'];
+
+  // Function to get all of the files in a directory, recursively.
+  function recurseDir(
+    dirname: string,
+    files: string[],
+    skipDirs: string[] = ignoreDirs
+  ) {
+    if (!fs.existsSync(dirname)) {
+      return files;
+    }
+    fs.readdirSync(dirname).forEach(fpath => {
+      if (skipDirs.includes(fpath)) {
+        return files;
+      }
+      const absolute = path.join(dirname, fpath);
+      if (fs.statSync(absolute).isDirectory())
+        return recurseDir(absolute, files);
+      else return files.push(absolute);
+    });
+    return files;
+  }
+
+  if (!isPrivate) {
+    // Ensure style files are included by pattern.
+    const styleFiles = recurseDir(path.join(pkgPath, 'style'), []);
+    styleFiles.forEach(fpath => {
+      const basePath = fpath.slice(pkgPath.length + 1);
+      let found = false;
+      filePatterns.forEach(fpattern => {
+        if (minimatch.default(basePath, fpattern)) {
+          found = true;
+        }
+      });
+      if (!found) {
+        messages.push(`File ${basePath} not included in files`);
+      }
+    });
+
+    // Ensure source TS files are included in lib (.js, .js.map, .d.ts)
+    const srcFiles = recurseDir(path.join(pkgPath, 'src'), []);
+    srcFiles.forEach(fpath => {
+      const basePath = fpath
+        .slice(pkgPath.length + 1)
+        .replace('src', 'lib')
+        .split(path.sep)
+        .join('/');
+      ['.js', '.js.map', '.d.ts'].forEach(ending => {
+        let found = false;
+        const targetPattern = basePath.replace(/\.tsx?$/g, ending);
+        filePatterns.forEach(fpattern => {
+          if (minimatch.default(targetPattern, fpattern)) {
+            found = true;
+          }
+        });
+        if (!found) {
+          messages.push(`File ${targetPattern} not included in files`);
+        }
+      });
+    });
+
+    // Ensure source files are all included
+    let anySourceMatch = false;
+    const missingSourceMessages: string[] = [];
+    srcFiles.forEach(fpath => {
+      const basepath = fpath
+        .slice(pkgPath.length + 1)
+        .split(path.sep)
+        .join('/');
+      let found = false;
+      filePatterns.forEach(fpattern => {
+        if (minimatch.default(basepath, fpattern)) {
+          found = true;
+        }
+      });
+      anySourceMatch = anySourceMatch || found;
+      if (!found) {
+        missingSourceMessages.push(
+          `Source file ${basepath} not included in files`
+        );
+      }
+    });
+    if (srcFiles.length && !anySourceMatch) {
+      messages.push('Found no src file inclusion, adding src/**/*.{ts,tsx}');
+      if (!data.files) {
+        data.files = [];
+      }
+      data.files.push('src/**/*.{ts,tsx}');
+    } else {
+      messages.push(...missingSourceMessages);
     }
   }
 
@@ -312,10 +629,70 @@ export async function ensurePackage(
   // when a package is actually being published.
   delete data.gitHead;
 
-  // Ensure there is a minimal prepublishOnly script
-  if (!data.private && !data.scripts.prepublishOnly) {
-    messages.push(`prepublishOnly script missing in ${pkgPath}`);
-    data.scripts.prepublishOnly = 'npm run build';
+  // Ensure that there is a public access set, if the package is not private.
+  if (!isPrivate) {
+    data['publishConfig'] = { access: 'public' };
+  }
+
+  // Ensure there is not a prepublishOnly script.
+  // Since publishing is handled by an automated script and we don't
+  // Want to run individual scripts during publish.
+  if (data.scripts?.prepublishOnly) {
+    delete data.scripts.prepublishOnly;
+  }
+
+  // If the package does not use `tsc` in its
+  // build script, add a `build:all` target
+  const buildScript = data.scripts?.build || '';
+  if (
+    path.basename(pkgPath) != 'galata' &&
+    buildScript?.indexOf('tsc') === -1 &&
+    !isPrivate
+  ) {
+    data.scripts['build:all'] = 'npm run build';
+  }
+
+  // Ensure the main module has an @packageDocumentation comment
+  let mainFile = path.join(pkgPath, 'src', 'index.ts');
+  if (!fs.existsSync(mainFile)) {
+    mainFile = path.join(pkgPath, 'src', 'index.tsx');
+  }
+  if (pkgPath.includes('packages') && fs.existsSync(mainFile)) {
+    let main = fs.readFileSync(mainFile, 'utf8');
+    let lines = main.split('\n');
+    let writeMain = false;
+
+    if (!main.includes('Copyright ')) {
+      lines.unshift(
+        '// Copyright (c) Jupyter Development Team.',
+        '// Distributed under the terms of the Modified BSD License.',
+        ''
+      );
+      writeMain = true;
+    }
+    if (!main.includes('@packageDocumentation')) {
+      lines.splice(
+        lines.indexOf(''),
+        0,
+        '/**',
+        ' * @packageDocumentation',
+        ` * @module ${data.name.split('/')[1]}`,
+        ' */'
+      );
+      writeMain = true;
+    }
+
+    if (writeMain) {
+      fs.writeFileSync(mainFile, lines.join('\n'));
+    }
+  }
+
+  // Ensure extra LICENSE is not packaged (always use repo license)
+  let licenseFile = path.join(pkgPath, 'LICENSE');
+
+  if (fs.existsSync(licenseFile)) {
+    messages.push('Removed LICENSE (prefer top-level)');
+    await fs.unlink(licenseFile);
   }
 
   if (utils.writePackageData(path.join(pkgPath, 'package.json'), data)) {
@@ -340,61 +717,71 @@ export async function ensureUiComponents(
   dorequire: boolean = false
 ): Promise<string[]> {
   const funcName = 'ensureUiComponents';
-  let messages: string[] = [];
+  const pkgName = utils.stem(pkgPath);
+  const messages: string[] = [];
 
-  const svgs = glob.sync(path.join(pkgPath, 'style/icons', '**/*.svg'));
+  const svgPaths = glob.sync(path.join(pkgPath, 'style/icons', '**/*.svg'));
 
   /* support for glob import of icon svgs */
   const iconSrcDir = path.join(pkgPath, 'src/icon');
 
   // build the per-icon import code
-  let _iconImportStatements: string[] = [];
-  let _iconModelDeclarations: string[] = [];
-  svgs.forEach(svg => {
-    const name = utils.stem(svg);
-    const svgpath = path
-      .relative(iconSrcDir, svg)
+  const _svgImportStatements: string[] = [];
+  const _labiconConstructions: string[] = [];
+  svgPaths.forEach(svgPath => {
+    const svgName = utils.stem(svgPath);
+    const svgImportPath = path
+      .relative(iconSrcDir, svgPath)
       .split(path.sep)
       .join('/');
 
+    const svgstrRef = utils.camelCase(svgName) + 'Svgstr';
+    const iconRef = utils.camelCase(svgName) + 'Icon';
+    const iconName = [pkgName, utils.stem(svgPath)].join(':');
+
     if (dorequire) {
       // load the icon svg using `require`
-      _iconModelDeclarations.push(
-        `{ name: '${name}', svg: require('${svgpath}').default }`
+      _labiconConstructions.push(
+        `export const ${iconRef} = new LabIcon({ name: '${iconName}', svgstr: require('${svgImportPath}').default });`
       );
     } else {
       // load the icon svg using `import`
-      const nameCamel = utils.camelCase(name) + 'Svg';
+      _svgImportStatements.push(`import ${svgstrRef} from '${svgImportPath}';`);
 
-      _iconImportStatements.push(`import ${nameCamel} from '${svgpath}';`);
-      _iconModelDeclarations.push(`{ name: '${name}', svg: ${nameCamel} }`);
+      _labiconConstructions.push(
+        `export const ${iconRef} = new LabIcon({ name: '${iconName}', svgstr: ${svgstrRef} });`
+      );
     }
   });
-  const iconImportStatements = _iconImportStatements.join('\n');
-  const iconModelDeclarations = _iconModelDeclarations.join(',\n');
+
+  // sort the statements and then join them
+  const svgImportStatements = _svgImportStatements.sort().join('\n');
+  const labiconConstructions = _labiconConstructions.sort().join('\n');
 
   // generate the actual contents of the iconImports file
   const iconImportsPath = path.join(iconSrcDir, 'iconimports.ts');
   const iconImportsContents = utils.fromTemplate(
     HEADER_TEMPLATE + ICON_IMPORTS_TEMPLATE,
-    { funcName, iconImportStatements, iconModelDeclarations }
+    { funcName, svgImportStatements, labiconConstructions }
   );
-  messages.push(...ensureFile(iconImportsPath, iconImportsContents));
+  messages.push(
+    ...(await ensureFile(iconImportsPath, iconImportsContents, false))
+  );
 
   /* support for deprecated icon CSS classes */
   const iconCSSDir = path.join(pkgPath, 'style');
 
   // build the per-icon import code
-  let _iconCSSUrls: string[] = [];
-  let _iconCSSDeclarations: string[] = [];
-  svgs.forEach(svg => {
-    const name = utils.stem(svg);
-    const urlName = 'jp-icon-' + name;
-    const className = 'jp-' + utils.camelCase(name, true) + 'Icon';
+  const _iconCSSUrls: string[] = [];
+  const _iconCSSDeclarations: string[] = [];
+  svgPaths.forEach(svgPath => {
+    const svgName = utils.stem(svgPath);
+    const urlName = 'jp-icon-' + svgName;
+    const className = 'jp-' + utils.camelCase(svgName, true) + 'Icon';
 
     _iconCSSUrls.push(
       `--${urlName}: url('${path
-        .relative(iconCSSDir, svg)
+        .relative(iconCSSDir, svgPath)
         .split(path.sep)
         .join('/')}');`
     );
@@ -402,8 +789,10 @@ export async function ensureUiComponents(
       `.${className} {background-image: var(--${urlName})}`
     );
   });
-  const iconCSSUrls = _iconCSSUrls.join('\n');
-  const iconCSSDeclarations = _iconCSSDeclarations.join('\n');
+
+  // sort the statements and then join them
+  const iconCSSUrls = _iconCSSUrls.sort().join('\n');
+  const iconCSSDeclarations = _iconCSSDeclarations.sort().join('\n\n');
 
   // generate the actual contents of the iconCSSClasses file
   const iconCSSClassesPath = path.join(iconCSSDir, 'deprecated.css');
@@ -411,7 +800,9 @@ export async function ensureUiComponents(
     HEADER_TEMPLATE + ICON_CSS_CLASSES_TEMPLATE,
     { funcName, iconCSSUrls, iconCSSDeclarations }
   );
-  messages.push(...ensureFile(iconCSSClassesPath, iconCSSClassesContent));
+  messages.push(
+    ...(await ensureFile(iconCSSClassesPath, iconCSSClassesContent))
+  );
 
   return messages;
 }
@@ -461,9 +852,19 @@ export interface IEnsurePackageOptions {
   cssImports?: string[];
 
   /**
+   * The css module import list for the package.
+   */
+  cssModuleImports?: string[];
+
+  /**
    * Packages which are allowed to have multiple versions pulled in
    */
   differentVersions?: string[];
+
+  /**
+   * Older versions supported by core packages in addition to the latest.
+   */
+  backwardVersions?: Record<string, Record<string, string>>;
 }
 
 /**
@@ -471,23 +872,23 @@ export interface IEnsurePackageOptions {
  * do nothing and return an empty array. If they don't match, overwrite the
  * file and return an array with an update message.
  *
- * @param fpath: The path to the file being checked. The file must exist,
+ * @param fpath The path to the file being checked. The file must exist,
  * or else this function does nothing.
  *
- * @param contents: The desired file contents.
+ * @param contents The desired file contents.
  *
- * @param prettify: default = true. If true, format the contents with
+ * @param prettify default = true. If true, format the contents with
  * `prettier` before comparing/writing. Set to false only if you already
  * know your code won't be modified later by the `prettier` git commit hook.
  *
  * @returns a string array with 0 or 1 messages.
  */
-function ensureFile(
+async function ensureFile(
   fpath: string,
   contents: string,
   prettify: boolean = true
-): string[] {
-  let messages: string[] = [];
+): Promise<string[]> {
+  const messages: string[] = [];
 
   if (!fs.existsSync(fpath)) {
     // bail
@@ -499,7 +900,7 @@ function ensureFile(
 
   // (maybe) run the newly generated contents through prettier before comparing
   let formatted = prettify
-    ? prettier.format(contents, { filepath: fpath, singleQuote: true })
+    ? await prettier.format(contents, { filepath: fpath, singleQuote: true })
     : contents;
 
   const prev = fs.readFileSync(fpath, { encoding: 'utf8' });
@@ -526,7 +927,7 @@ function ensureFile(
  * @returns An array of package names.
  */
 function getImports(sourceFile: ts.SourceFile): string[] {
-  let imports: string[] = [];
+  const imports: string[] = [];
   handleNode(sourceFile);
 
   function handleNode(node: any): void {

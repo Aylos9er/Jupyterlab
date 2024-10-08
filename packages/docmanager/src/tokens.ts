@@ -1,26 +1,39 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import { Token } from '@phosphor/coreutils';
-
-import { IDisposable } from '@phosphor/disposable';
-
-import { ISignal } from '@phosphor/signaling';
-
-import { Widget } from '@phosphor/widgets';
-
+import { IChangedArgs } from '@jupyterlab/coreutils';
 import { DocumentRegistry, IDocumentWidget } from '@jupyterlab/docregistry';
-
 import { Contents, Kernel, ServiceManager } from '@jupyterlab/services';
+import { Token } from '@lumino/coreutils';
+import { IDisposable } from '@lumino/disposable';
+import { ISignal } from '@lumino/signaling';
+import { Widget } from '@lumino/widgets';
 
-/* tslint:disable */
 /**
  * The document registry token.
  */
 export const IDocumentManager = new Token<IDocumentManager>(
-  '@jupyterlab/docmanager:IDocumentManager'
+  '@jupyterlab/docmanager:IDocumentManager',
+  `A service for the manager for all
+  documents used by the application. Use this if you want to open and close documents,
+  create and delete files, and otherwise interact with the file system.`
 );
-/* tslint:enable */
+
+/**
+ * The document widget opener token.
+ */
+export const IDocumentWidgetOpener = new Token<IDocumentWidgetOpener>(
+  '@jupyterlab/docmanager:IDocumentWidgetOpener',
+  `A service to open a widget.`
+);
+
+/**
+ * The recent documents database token.
+ */
+export const IRecentsManager = new Token<IRecentsManager>(
+  '@jupyterlab/docmanager:IRecentsManager',
+  `A service providing information about recently opened and closed documents`
+);
 
 /**
  * The interface for a document manager.
@@ -47,9 +60,29 @@ export interface IDocumentManager extends IDisposable {
   autosave: boolean;
 
   /**
+   * Whether to ask confirmation to close a tab or not.
+   */
+  confirmClosingDocument: boolean;
+
+  /**
    * Determines the time interval for autosave in seconds.
    */
   autosaveInterval: number;
+
+  /**
+   * Defines max acceptable difference, in milliseconds, between last modified timestamps on disk and client.
+   */
+  lastModifiedCheckMargin: number;
+
+  /**
+   * Whether to ask the user to rename untitled file on first manual save.
+   */
+  renameUntitledFileOnSave: boolean;
+
+  /**
+   * Signal triggered when an attribute changes.
+   */
+  readonly stateChanged: ISignal<IDocumentManager, IChangedArgs<any>>;
 
   /**
    * Clone a widget.
@@ -120,7 +153,7 @@ export interface IDocumentManager extends IDisposable {
     path: string,
     widgetName?: string,
     kernel?: Partial<Kernel.IModel>
-  ): Widget;
+  ): Widget | undefined;
 
   /**
    * Delete a file.
@@ -134,6 +167,16 @@ export interface IDocumentManager extends IDisposable {
    * sessions are using the kernel, the session will be shut down.
    */
   deleteFile(path: string): Promise<void>;
+
+  /**
+   * Duplicate a file.
+   *
+   * @param path - The full path to the file to be duplicated.
+   *
+   * @returns A promise which resolves when the file is duplicated.
+   *
+   */
+  duplicate(path: string): Promise<Contents.IModel>;
 
   /**
    * See if a widget already exists for the given path and widget name.
@@ -229,3 +272,80 @@ export interface IDocumentManager extends IDisposable {
    */
   rename(oldPath: string, newPath: string): Promise<Contents.IModel>;
 }
+
+/**
+ * The interface for a widget opener.
+ */
+export interface IDocumentWidgetOpener {
+  /**
+   * Open the given widget.
+   */
+  open(widget: IDocumentWidget, options?: DocumentRegistry.IOpenOptions): void;
+
+  /**
+   * A signal emitted when a widget is opened
+   */
+  readonly opened: ISignal<IDocumentWidgetOpener, IDocumentWidget>;
+}
+
+/**
+ * Recent opened items manager.
+ */
+export interface IRecentsManager extends IDisposable {
+  /**
+   * Get the recently opened documents.
+   */
+  readonly recentlyOpened: RecentDocument[];
+
+  /**
+   * Get the recently closed items.
+   */
+  readonly recentlyClosed: RecentDocument[];
+
+  /**
+   * Signal emitted when either of the list changes.
+   */
+  readonly changed: ISignal<IRecentsManager, void>;
+
+  /**
+   * Check if the recent item is valid, remove if it from both lists if it is not.
+   */
+  validate(recent: RecentDocument): Promise<boolean>;
+
+  /**
+   * Add a new path to the recent list.
+   */
+  addRecent(
+    document: Omit<RecentDocument, 'root'>,
+    event: 'opened' | 'closed'
+  ): void;
+
+  /**
+   * Remove the document from recents list.
+   */
+  removeRecent(document: RecentDocument, event: 'opened' | 'closed'): void;
+}
+
+/**
+ * The interface for a recent document.
+ */
+export type RecentDocument = {
+  /**
+   * The server root path.
+   *
+   * Allows to select only the currently accessible documents.
+   */
+  root: string;
+  /**
+   * The path to the document.
+   */
+  path: string;
+  /**
+   * The document content type or `directory` literal for directories.
+   */
+  contentType: string;
+  /**
+   * The factory that was used when the document was most recently opened or closed.
+   */
+  factory?: string;
+};

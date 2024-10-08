@@ -1,49 +1,14 @@
+/* eslint-disable camelcase */
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
+
 import sanitize from 'sanitize-html';
-
-export interface ISanitizer {
-  /**
-   * Sanitize an HTML string.
-   *
-   * @param dirty - The dirty text.
-   *
-   * @param options - The optional sanitization options.
-   *
-   * @returns The sanitized string.
-   */
-  sanitize(dirty: string, options?: ISanitizer.IOptions): string;
-}
-
-/**
- * The namespace for `ISanitizer` related interfaces.
- */
-export namespace ISanitizer {
-  /**
-   * The options used to sanitize.
-   */
-  export interface IOptions {
-    /**
-     * The allowed tags.
-     */
-    allowedTags?: string[];
-
-    /**
-     * The allowed attributes for a given tag.
-     */
-    allowedAttributes?: { [key: string]: string[] };
-
-    /**
-     * The allowed style values for a given tag.
-     */
-    allowedStyles?: { [key: string]: { [key: string]: RegExp[] } };
-  }
-}
+import { IRenderMime } from '@jupyterlab/rendermime-interfaces';
 
 /**
  * Helper class that contains regular expressions for inline CSS style validation.
  *
- * Which properties (and values) to allow is largly based on the Google Caja project:
+ * Which properties (and values) to allow is largely based on the Google Caja project:
  *   https://github.com/google/caja
  *
  * The regular expressions are largly based on the syntax definition found at
@@ -64,7 +29,7 @@ class CssProp {
     number: `[+-]?([0-9]*[.])?[0-9]+(e-?[0-9]*)?`,
     number_pos: `[+]?([0-9]*[.])?[0-9]+(e-?[0-9]*)?`,
     number_zero_hundred: `[+]?(([0-9]|[1-9][0-9])([.][0-9]+)?|100)`,
-    number_zero_one: `[+]?(1([.][0]+)?|0([.][0-9]+)?)`
+    number_zero_one: `[+]?(1([.][0]+)?|0?([.][0-9]+)?)`
   };
 
   /*
@@ -87,7 +52,7 @@ class CssProp {
   };
 
   /*
-   * Atomic (i.e. not dependant on other regular expresions) sub RegEx segments
+   * Atomic (i.e. not dependant on other regular expressions) sub RegEx segments
    */
   private static readonly A = {
     absolute_size: `xx-small|x-small|small|medium|large|x-large|xx-large`,
@@ -119,7 +84,7 @@ class CssProp {
   };
 
   /*
-   * Compound (i.e. dependant on other (sub) regular expresions) sub RegEx segments
+   * Compound (i.e. dependant on other (sub) regular expressions) sub RegEx segments
    */
   private static readonly _C = {
     alpha: `${CssProp.N.integer_zero_ff}|${CssProp.N.number_zero_one}|${CssProp.B.percentage_zero_hundred}`,
@@ -129,6 +94,8 @@ class CssProp {
     border_width: `thin|medium|thick|${CssProp.B.length}`,
     bottom: `${CssProp.B.length}|auto`,
     color: `${CssProp._COLOR.hex}|${CssProp._COLOR.rgb}|${CssProp._COLOR.rgba}|${CssProp._COLOR.name}`,
+    color_stop_length: `(${CssProp.B.len_or_perc}\\s*){1,2}`,
+    linear_color_hint: `${CssProp.B.len_or_perc}`,
     family_name: `${CssProp.B.string}|(${CssProp.B.ident}\\s*)+`,
     image_decl: CssProp.B.url,
     left: `${CssProp.B.length}|auto`,
@@ -145,16 +112,32 @@ class CssProp {
 
   private static readonly _C1 = {
     image_list: `image\\(\\s*(${CssProp.B.url})*\\s*(${CssProp.B.url}|${CssProp._C.color})\\s*\\)`,
+    linear_color_stop: `(${CssProp._C.color})(\\s*${CssProp._C.color_stop_length})?`,
     shadow: `((${CssProp._C.color})\\s+((${CssProp.B.length})\\s*){2,4}(\s+inset)?)|((inset\\s+)?((${CssProp.B.length})\\s*){2,4}\\s*(${CssProp._C.color})?)`
   };
 
   private static readonly _C2 = {
-    bg_image: `(${CssProp.B.url}|${CssProp._C1.image_list})|none`,
-    image: `${CssProp.B.url}|${CssProp._C1.image_list}`,
+    color_stop_list: `((${CssProp._C1.linear_color_stop})(\\s*(${CssProp._C.linear_color_hint}))?\\s*,\\s*)+(${CssProp._C1.linear_color_stop})`,
     shape: `rect\\(\\s*(${CssProp._C.top})\\s*,\\s*(${CssProp._C.right})\\s*,\\s*(${CssProp._C.bottom})\\s*,\\s*(${CssProp._C.left})\\s*\\)`
   };
 
-  private static readonly C = { ...CssProp._C, ...CssProp._C1, ...CssProp._C2 };
+  private static readonly _C3 = {
+    linear_gradient: `linear-gradient\\((((${CssProp.B.angle})|to\\s+(${CssProp.A.side_or_corner}))\\s*,\\s*)?\\s*(${CssProp._C2.color_stop_list})\\s*\\)`,
+    radial_gradient: `radial-gradient\\(((((${CssProp.A.ending_shape})|(${CssProp._C.size}))\\s*)*\\s*(at\\s+${CssProp._C.position})?\\s*,\\s*)?\\s*(${CssProp._C2.color_stop_list})\\s*\\)`
+  };
+
+  private static readonly _C4 = {
+    image: `${CssProp.B.url}|${CssProp._C3.linear_gradient}|${CssProp._C3.radial_gradient}|${CssProp._C1.image_list}`,
+    bg_image: `(${CssProp.B.url}|${CssProp._C3.linear_gradient}|${CssProp._C3.radial_gradient}|${CssProp._C1.image_list})|none`
+  };
+
+  private static readonly C = {
+    ...CssProp._C,
+    ...CssProp._C1,
+    ...CssProp._C2,
+    ...CssProp._C3,
+    ...CssProp._C4
+  };
 
   /*
    * Property value regular expressions not dependant on other sub expressions
@@ -450,7 +433,10 @@ class CssProp {
 /**
  * A class to sanitize HTML strings.
  */
-class Sanitizer implements ISanitizer {
+export class Sanitizer implements IRenderMime.ISanitizer {
+  constructor() {
+    this._options = this._generateOptions();
+  }
   /**
    * Sanitize an HTML string.
    *
@@ -460,11 +446,48 @@ class Sanitizer implements ISanitizer {
    *
    * @returns The sanitized string.
    */
-  sanitize(dirty: string, options?: ISanitizer.IOptions): string {
+  sanitize(dirty: string, options?: IRenderMime.ISanitizerOptions): string {
     return sanitize(dirty, { ...this._options, ...(options || {}) });
   }
 
-  private _options: sanitize.IOptions = {
+  /**
+   * @returns Whether to replace URLs by HTML anchors.
+   */
+  getAutolink(): boolean {
+    return this._autolink;
+  }
+
+  /**
+   * Set the allowed schemes
+   *
+   * @param scheme Allowed schemes
+   */
+  setAllowedSchemes(scheme: Array<string>): void {
+    // Force copy of `scheme`
+    this._options.allowedSchemes = [...scheme];
+  }
+
+  /**
+   * Set the URL replacement boolean.
+   *
+   * @param autolink URL replacement boolean.
+   */
+  setAutolink(autolink: boolean): void {
+    this._autolink = autolink;
+  }
+
+  /**
+   * Set the whether to allow `name` and `id` attributes.
+   */
+  setAllowNamedProperties(allowNamedProperties: boolean): void {
+    this._allowNamedProperties = allowNamedProperties;
+    this._options = this._generateOptions();
+  }
+
+  private _autolink: boolean = true;
+  private _allowNamedProperties: boolean = false;
+  private _options: sanitize.IOptions;
+  private _generateOptions = (): sanitize.IOptions => ({
     // HTML tags that are allowed to be used. Tags were extracted from Google Caja
     allowedTags: [
       'a',
@@ -579,7 +602,7 @@ class Sanitizer implements ISanitizer {
         'dir',
         'draggable',
         'hidden',
-        'id',
+        ...(this._allowNamedProperties ? ['id'] : []),
         'inert',
         'itemprop',
         'itemref',
@@ -596,7 +619,7 @@ class Sanitizer implements ISanitizer {
         'coords',
         'href',
         'hreflang',
-        'name',
+        ...(this._allowNamedProperties ? ['name'] : []),
         'rel',
         'shape',
         'tabindex',
@@ -625,7 +648,16 @@ class Sanitizer implements ISanitizer {
       bdo: ['dir'],
       blockquote: ['cite'],
       br: ['clear'],
-      button: ['accesskey', 'disabled', 'name', 'tabindex', 'type', 'value'],
+      button: [
+        'accesskey',
+        'data-commandlinker-args',
+        'data-commandlinker-command',
+        'disabled',
+        ...(this._allowNamedProperties ? ['name'] : []),
+        'tabindex',
+        'type',
+        'value'
+      ],
       canvas: ['height', 'width'],
       caption: ['align'],
       col: ['align', 'char', 'charoff', 'span', 'valign', 'width'],
@@ -649,11 +681,10 @@ class Sanitizer implements ISanitizer {
       font: ['color', 'face', 'size'],
       form: [
         'accept',
-        'action',
         'autocomplete',
         'enctype',
         'method',
-        'name',
+        ...(this._allowNamedProperties ? ['name'] : []),
         'novalidate'
       ],
       h1: ['align'],
@@ -678,7 +709,7 @@ class Sanitizer implements ISanitizer {
         'height',
         'hspace',
         'ismap',
-        'name',
+        ...(this._allowNamedProperties ? ['name'] : []),
         'src',
         'usemap',
         'vspace',
@@ -699,7 +730,7 @@ class Sanitizer implements ISanitizer {
         'maxlength',
         'min',
         'multiple',
-        'name',
+        ...(this._allowNamedProperties ? ['name'] : []),
         'placeholder',
         'readonly',
         'required',
@@ -715,13 +746,13 @@ class Sanitizer implements ISanitizer {
       label: ['accesskey', 'for'],
       legend: ['accesskey', 'align'],
       li: ['type', 'value'],
-      map: ['name'],
+      map: this._allowNamedProperties ? ['name'] : [],
       menu: ['compact', 'label', 'type'],
       meter: ['high', 'low', 'max', 'min', 'value'],
       ol: ['compact', 'reversed', 'start', 'type'],
       optgroup: ['disabled', 'label'],
       option: ['disabled', 'label', 'selected', 'value'],
-      output: ['for', 'name'],
+      output: ['for', ...(this._allowNamedProperties ? ['name'] : [])],
       p: ['align'],
       pre: ['width'],
       progress: ['max', 'min', 'value'],
@@ -730,7 +761,7 @@ class Sanitizer implements ISanitizer {
         'autocomplete',
         'disabled',
         'multiple',
-        'name',
+        ...(this._allowNamedProperties ? ['name'] : []),
         'required',
         'size',
         'tabindex'
@@ -770,7 +801,7 @@ class Sanitizer implements ISanitizer {
         'cols',
         'disabled',
         'inputmode',
-        'name',
+        ...(this._allowNamedProperties ? ['name'] : []),
         'placeholder',
         'readonly',
         'required',
@@ -953,6 +984,7 @@ class Sanitizer implements ISanitizer {
       // Set the "disabled" attribute for <input> tags.
       input: sanitize.simpleTransform('input', { disabled: 'disabled' })
     },
+    allowedSchemes: [...sanitize.defaults.allowedSchemes],
     allowedSchemesByTag: {
       // Allow 'attachment:' img src (used for markdown cell attachments).
       img: sanitize.defaults.allowedSchemes.concat(['attachment'])
@@ -962,10 +994,5 @@ class Sanitizer implements ISanitizer {
     // Since embedded data is no longer deemed to be a threat, validation can be skipped.
     // See https://github.com/jupyterlab/jupyterlab/issues/5183
     allowedSchemesAppliedToAttributes: ['href', 'cite']
-  };
+  });
 }
-
-/**
- * The default instance of an `ISanitizer` meant for use by user code.
- */
-export const defaultSanitizer: ISanitizer = new Sanitizer();

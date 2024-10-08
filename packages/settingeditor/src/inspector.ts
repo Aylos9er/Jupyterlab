@@ -1,20 +1,22 @@
-/*-----------------------------------------------------------------------------
+/* -----------------------------------------------------------------------------
 | Copyright (c) Jupyter Development Team.
 | Distributed under the terms of the Modified BSD License.
 |----------------------------------------------------------------------------*/
 
-import { DataConnector, ISchemaValidator } from '@jupyterlab/coreutils';
-
 import { InspectionHandler, InspectorPanel } from '@jupyterlab/inspector';
-
 import {
   IRenderMimeRegistry,
   RenderMimeRegistry,
   standardRendererFactories
 } from '@jupyterlab/rendermime';
-
-import { ReadonlyJSONObject } from '@phosphor/coreutils';
-
+import { ISchemaValidator } from '@jupyterlab/settingregistry';
+import { DataConnector } from '@jupyterlab/statedb';
+import {
+  ITranslator,
+  nullTranslator,
+  TranslationBundle
+} from '@jupyterlab/translation';
+import { ReadonlyJSONObject } from '@lumino/coreutils';
 import { RawEditor } from './raweditor';
 
 /**
@@ -22,18 +24,23 @@ import { RawEditor } from './raweditor';
  */
 export function createInspector(
   editor: RawEditor,
-  rendermime?: IRenderMimeRegistry
+  rendermime?: IRenderMimeRegistry,
+  translator?: ITranslator
 ): InspectorPanel {
-  const connector = new InspectorConnector(editor);
+  translator = translator || nullTranslator;
+  const trans = translator.load('jupyterlab');
+  const connector = new InspectorConnector(editor, translator);
   const inspector = new InspectorPanel({
-    initialContent: 'Any errors will be listed here'
+    initialContent: trans.__('Any errors will be listed here'),
+    translator: translator
   });
   const handler = new InspectionHandler({
     connector,
     rendermime:
       rendermime ||
       new RenderMimeRegistry({
-        initialFactories: standardRendererFactories
+        initialFactories: standardRendererFactories,
+        translator: translator
       })
   });
 
@@ -57,9 +64,10 @@ class InspectorConnector extends DataConnector<
   void,
   InspectionHandler.IRequest
 > {
-  constructor(editor: RawEditor) {
+  constructor(editor: RawEditor, translator?: ITranslator) {
     super();
     this._editor = editor;
+    this._trans = (translator ?? nullTranslator).load('jupyterlab');
   }
 
   /**
@@ -67,26 +75,55 @@ class InspectorConnector extends DataConnector<
    */
   fetch(
     request: InspectionHandler.IRequest
-  ): Promise<InspectionHandler.IReply> {
-    return new Promise<InspectionHandler.IReply>(resolve => {
+  ): Promise<InspectionHandler.IReply | undefined> {
+    return new Promise<InspectionHandler.IReply | undefined>(resolve => {
       // Debounce requests at a rate of 100ms.
       const current = (this._current = window.setTimeout(() => {
         if (current !== this._current) {
-          return resolve(null);
+          return resolve(undefined);
         }
 
         const errors = this._validate(request.text);
 
         if (!errors) {
           return resolve({
-            data: { 'text/markdown': 'No errors found' },
+            data: { 'text/markdown': this._trans.__('No errors found') },
             metadata: {}
           });
         }
 
-        resolve({ data: Private.render(errors), metadata: {} });
+        resolve({ data: this.render(errors), metadata: {} });
       }, 100));
     });
+  }
+  /**
+   * Render validation errors as an HTML string.
+   */
+  protected render(errors: ISchemaValidator.IError[]): ReadonlyJSONObject {
+    return {
+      'text/markdown': errors.map(this.renderError.bind(this)).join('')
+    };
+  }
+
+  /**
+   * Render an individual validation error as a markdown string.
+   */
+  protected renderError(error: ISchemaValidator.IError): string {
+    switch (error.keyword) {
+      case 'additionalProperties':
+        return `**\`[${this._trans.__('additional property error')}]\`**
+          ${this._trans.__(
+            '`%1` is not a valid property',
+            error.params?.additionalProperty
+          )}`;
+      case 'syntax':
+        return `**\`[${this._trans.__('syntax error')}]\`** *${error.message}*`;
+      case 'type':
+        return `**\`[${this._trans.__('type error')}]\`**
+          \`${error.instancePath}\` ${error.message}`;
+      default:
+        return `**\`[${this._trans.__('error')}]\`** *${error.message}*`;
+    }
   }
 
   private _validate(raw: string): ISchemaValidator.IError[] | null {
@@ -101,38 +138,7 @@ class InspectorConnector extends DataConnector<
     return validator.validateData({ data, id, raw, schema, version }, false);
   }
 
+  private _trans: TranslationBundle;
   private _current = 0;
   private _editor: RawEditor;
-}
-
-/**
- * A namespace for private module data.
- */
-namespace Private {
-  /**
-   * Render validation errors as an HTML string.
-   */
-  export function render(
-    errors: ISchemaValidator.IError[]
-  ): ReadonlyJSONObject {
-    return { 'text/markdown': errors.map(renderError).join('') };
-  }
-
-  /**
-   * Render an individual validation error as a markdown string.
-   */
-  function renderError(error: ISchemaValidator.IError): string {
-    switch (error.keyword) {
-      case 'additionalProperties':
-        return `**\`[additional property error]\`**
-          \`${error.params.additionalProperty}\` is not a valid property`;
-      case 'syntax':
-        return `**\`[syntax error]\`** *${error.message}*`;
-      case 'type':
-        return `**\`[type error]\`**
-          \`${error.dataPath}\` ${error.message}`;
-      default:
-        return `**\`[error]\`** *${error.message}*`;
-    }
-  }
 }

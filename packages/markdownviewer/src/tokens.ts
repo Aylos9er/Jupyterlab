@@ -2,16 +2,16 @@
 // Distributed under the terms of the Modified BSD License.
 
 import { IWidgetTracker } from '@jupyterlab/apputils';
-
-import { Token } from '@phosphor/coreutils';
-
+import { Token } from '@lumino/coreutils';
 import { MarkdownDocument } from './widget';
 
 /**
  * The markdownviewer tracker token.
  */
 export const IMarkdownViewerTracker = new Token<IMarkdownViewerTracker>(
-  '@jupyterlab/markdownviewer:IMarkdownViewerTracker'
+  '@jupyterlab/markdownviewer:IMarkdownViewerTracker',
+  `A widget tracker for markdown
+  document viewers. Use this if you want to iterate over and interact with rendered markdown documents.`
 );
 
 /**

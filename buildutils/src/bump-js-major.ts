@@ -1,9 +1,9 @@
-/*-----------------------------------------------------------------------------
+/* -----------------------------------------------------------------------------
 | Copyright (c) Jupyter Development Team.
 | Distributed under the terms of the Modified BSD License.
 |----------------------------------------------------------------------------*/
 
-import commander from 'commander';
+import { program as commander } from 'commander';
 import semver from 'semver';
 import path from 'path';
 import * as utils from './utils';
@@ -16,7 +16,7 @@ export function getDeps(
   lut: { [key: string]: { [key: string]: string } }
 ): Set<string> {
   const deps: Set<string> = new Set();
-  for (let name in lut) {
+  for (const name in lut) {
     if ('@jupyterlab/' + pkgName in lut[name]) {
       const otherName = name.replace('@jupyterlab/', '');
       deps.add(otherName);
@@ -36,6 +36,7 @@ commander
   .option('--force', 'Force the upgrade')
   .option('--dry-run', 'Show what would be executed')
   .action((pkg: string, others: Array<string>, options: any) => {
+    utils.exitOnUncaughtException();
     others.push(pkg);
     const toBump: Set<string> = new Set();
     const ignoreBump: Set<string> = new Set();
@@ -64,7 +65,7 @@ commander
     });
 
     // Look for dependencies of bumped packages
-    Array.from(toBump).forEach(val => {
+    toBump.forEach(val => {
       const deps = getDeps(val, lut);
       deps.forEach(dep => {
         maybeBump(dep);
@@ -94,8 +95,8 @@ commander
     }
 
     if (options.dryRun) {
-      console.log('Would run:');
-      console.log(cmd);
+      console.debug('Would run:');
+      console.debug(cmd);
       return;
     }
     utils.run(cmd);

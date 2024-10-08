@@ -1,29 +1,24 @@
-/*-----------------------------------------------------------------------------
+/* -----------------------------------------------------------------------------
 | Copyright (c) Jupyter Development Team.
 | Distributed under the terms of the Modified BSD License.
 |----------------------------------------------------------------------------*/
 
-import { Dialog, showDialog } from '@jupyterlab/apputils';
-
+import { Dialog, showDialog, showErrorMessage } from '@jupyterlab/apputils';
 import { CodeEditor } from '@jupyterlab/codeeditor';
-
-import { ISettingRegistry } from '@jupyterlab/coreutils';
-
 import { IRenderMimeRegistry } from '@jupyterlab/rendermime';
-
-import { CommandRegistry } from '@phosphor/commands';
-
-import { JSONExt } from '@phosphor/coreutils';
-
-import { Message } from '@phosphor/messaging';
-
-import { ISignal, Signal } from '@phosphor/signaling';
-
-import { Widget, StackedLayout } from '@phosphor/widgets';
-
+import { ISettingRegistry } from '@jupyterlab/settingregistry';
+import {
+  ITranslator,
+  nullTranslator,
+  TranslationBundle
+} from '@jupyterlab/translation';
+import { CommandRegistry } from '@lumino/commands';
+import { JSONExt } from '@lumino/coreutils';
+import { Message } from '@lumino/messaging';
+import { ISignal, Signal } from '@lumino/signaling';
+import { StackedLayout, Widget } from '@lumino/widgets';
 import { RawEditor } from './raweditor';
-
-import { SettingEditor } from './settingeditor';
+import { JsonSettingEditor } from './jsonsettingeditor';
 
 /**
  * The class name added to all plugin editors.
@@ -43,7 +38,10 @@ export class PluginEditor extends Widget {
     super();
     this.addClass(PLUGIN_EDITOR_CLASS);
 
-    const { commands, editorFactory, registry, rendermime } = options;
+    const { commands, editorFactory, registry, rendermime, translator } =
+      options;
+    this.translator = translator || nullTranslator;
+    this._trans = this.translator.load('jupyterlab');
 
     // TODO: Remove this layout. We were using this before when we
     // when we had a way to switch between the raw and table editor
@@ -57,7 +55,8 @@ export class PluginEditor extends Widget {
       editorFactory,
       onSaveError,
       registry,
-      rendermime
+      rendermime,
+      translator
     });
     this._rawEditor.handleMoved.connect(this._onStateChanged, this);
 
@@ -96,13 +95,13 @@ export class PluginEditor extends Widget {
   /**
    * The plugin editor layout state.
    */
-  get state(): SettingEditor.IPluginLayout {
+  get state(): JsonSettingEditor.IPluginLayout {
     const plugin = this._settings ? this._settings.id : '';
     const { sizes } = this._rawEditor;
 
     return { plugin, sizes };
   }
-  set state(state: SettingEditor.IPluginLayout) {
+  set state(state: JsonSettingEditor.IPluginLayout) {
     if (JSONExt.deepEqual(this.state, state)) {
       return;
     }
@@ -127,9 +126,12 @@ export class PluginEditor extends Widget {
     }
 
     return showDialog({
-      title: 'You have unsaved changes.',
-      body: 'Do you want to leave without saving?',
-      buttons: [Dialog.cancelButton(), Dialog.okButton()]
+      title: this._trans.__('You have unsaved changes.'),
+      body: this._trans.__('Do you want to leave without saving?'),
+      buttons: [
+        Dialog.cancelButton({ label: this._trans.__('Cancel') }),
+        Dialog.okButton({ label: this._trans.__('Ok') })
+      ]
     }).then(result => {
       if (!result.button.accept) {
         throw new Error('User canceled.');
@@ -179,6 +181,8 @@ export class PluginEditor extends Widget {
     (this.stateChanged as Signal<any, void>).emit(undefined);
   }
 
+  protected translator: ITranslator;
+  private _trans: TranslationBundle;
   private _rawEditor: RawEditor;
   private _settings: ISettingRegistry.ISettings | null = null;
   private _stateChanged = new Signal<this, void>(this);
@@ -226,6 +230,11 @@ export namespace PluginEditor {
      * The optional MIME renderer to use for rendering debug messages.
      */
     rendermime?: IRenderMimeRegistry;
+
+    /**
+     * The application language translator.
+     */
+    translator?: ITranslator;
   }
 }
 
@@ -236,13 +245,13 @@ namespace Private {
   /**
    * Handle save errors.
    */
-  export function onSaveError(reason: any): void {
+  export function onSaveError(
+    reason: Dialog.IError,
+    translator?: ITranslator
+  ): void {
+    translator = translator || nullTranslator;
+    const trans = translator.load('jupyterlab');
     console.error(`Saving setting editor value failed: ${reason.message}`);
-
-    void showDialog({
-      title: 'Your changes were not saved.',
-      body: reason.message,
-      buttons: [Dialog.okButton()]
-    });
+    void showErrorMessage(trans.__('Your changes were not saved.'), reason);
   }
 }

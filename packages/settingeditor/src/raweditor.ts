@@ -1,25 +1,16 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import { Toolbar, CommandToolbarButton } from '@jupyterlab/apputils';
-
 import { CodeEditor, CodeEditorWrapper } from '@jupyterlab/codeeditor';
-
-import { ISettingRegistry } from '@jupyterlab/coreutils';
-
 import { IRenderMimeRegistry } from '@jupyterlab/rendermime';
-
-import { CommandRegistry } from '@phosphor/commands';
-
-import { Message } from '@phosphor/messaging';
-
-import { ISignal, Signal } from '@phosphor/signaling';
-
-import { BoxLayout, Widget } from '@phosphor/widgets';
-
+import { ISettingRegistry } from '@jupyterlab/settingregistry';
+import { ITranslator, nullTranslator } from '@jupyterlab/translation';
+import { CommandToolbarButton, Toolbar } from '@jupyterlab/ui-components';
+import { CommandRegistry } from '@lumino/commands';
+import { Message } from '@lumino/messaging';
+import { ISignal, Signal } from '@lumino/signaling';
+import { BoxLayout, SplitPanel, Widget } from '@lumino/widgets';
 import { createInspector } from './inspector';
-
-import { SplitPanel } from './splitpanel';
 
 /**
  * A class name added to all raw editors.
@@ -37,16 +28,6 @@ const USER_CLASS = 'jp-SettingsRawEditor-user';
 const ERROR_CLASS = 'jp-mod-error';
 
 /**
- * The banner text for the default editor.
- */
-const DEFAULT_TITLE = 'System Defaults';
-
-/**
- * The banner text for the user settings editor.
- */
-const USER_TITLE = 'User Preferences';
-
-/**
  * A raw JSON settings editor.
  */
 export class RawEditor extends SplitPanel {
@@ -60,39 +41,45 @@ export class RawEditor extends SplitPanel {
       spacing: 1
     });
 
-    const { commands, editorFactory, registry } = options;
-
+    const { commands, editorFactory, registry, translator } = options;
     this.registry = registry;
+    this.translator = translator || nullTranslator;
     this._commands = commands;
 
     // Create read-only defaults editor.
     const defaults = (this._defaults = new CodeEditorWrapper({
-      model: new CodeEditor.Model(),
+      editorOptions: {
+        config: { readOnly: true }
+      },
+      model: new CodeEditor.Model({ mimeType: 'text/javascript' }),
       factory: editorFactory
     }));
 
-    defaults.editor.model.value.text = '';
-    defaults.editor.model.mimeType = 'text/javascript';
-    defaults.editor.setOption('readOnly', true);
-
     // Create read-write user settings editor.
     const user = (this._user = new CodeEditorWrapper({
-      model: new CodeEditor.Model(),
-      factory: editorFactory,
-      config: { lineNumbers: true }
+      editorOptions: {
+        config: { lineNumbers: true }
+      },
+      model: new CodeEditor.Model({ mimeType: 'text/javascript' }),
+      factory: editorFactory
     }));
 
     user.addClass(USER_CLASS);
-    user.editor.model.mimeType = 'text/javascript';
-    user.editor.model.value.changed.connect(this._onTextChanged, this);
+    user.editor.model.sharedModel.changed.connect(this._onTextChanged, this);
 
     // Create and set up an inspector.
-    this._inspector = createInspector(this, options.rendermime);
+    this._inspector = createInspector(
+      this,
+      options.rendermime,
+      this.translator
+    );
 
     this.addClass(RAW_EDITOR_CLASS);
     this._onSaveError = options.onSaveError;
-    this.addWidget(Private.defaultsEditor(defaults));
-    this.addWidget(Private.userEditor(user, this._toolbar, this._inspector));
+    this.addWidget(Private.defaultsEditor(defaults, this.translator));
+    this.addWidget(
+      Private.userEditor(user, this._toolbar, this._inspector, this.translator)
+    );
   }
 
   /**
@@ -125,7 +112,10 @@ export class RawEditor extends SplitPanel {
    * Tests whether the settings have been modified and need saving.
    */
   get isDirty(): boolean {
-    return this._user.editor.model.value.text !== this._settings.raw;
+    return (
+      this._user.editor.model.sharedModel.getSource() !== this._settings?.raw ??
+      ''
+    );
   }
 
   /**
@@ -160,8 +150,8 @@ export class RawEditor extends SplitPanel {
       this._onSettingsChanged();
     } else {
       this._settings = null;
-      defaults.editor.model.value.text = '';
-      user.editor.model.value.text = '';
+      defaults.editor.model.sharedModel.setSource('');
+      user.editor.model.sharedModel.setSource('');
     }
 
     this.update();
@@ -192,16 +182,18 @@ export class RawEditor extends SplitPanel {
       return;
     }
 
-    super.dispose();
+    this._defaults.model.dispose();
     this._defaults.dispose();
+    this._user.model.dispose();
     this._user.dispose();
+    super.dispose();
   }
 
   /**
    * Revert the editor back to original settings.
    */
   revert(): void {
-    this._user.editor.model.value.text = this.settings.raw;
+    this._user.editor.model.sharedModel.setSource(this.settings?.raw ?? '');
     this._updateToolbar(false, false);
   }
 
@@ -209,12 +201,12 @@ export class RawEditor extends SplitPanel {
    * Save the contents of the raw editor.
    */
   save(): Promise<void> {
-    if (!this.isDirty) {
+    if (!this.isDirty || !this._settings) {
       return Promise.resolve(undefined);
     }
 
     const settings = this._settings;
-    const source = this._user.editor.model.value.text;
+    const source = this._user.editor.model.sharedModel.getSource();
 
     return settings
       .save(source)
@@ -223,7 +215,7 @@ export class RawEditor extends SplitPanel {
       })
       .catch(reason => {
         this._updateToolbar(true, false);
-        this._onSaveError(reason);
+        this._onSaveError(reason, this.translator);
       });
   }
 
@@ -236,24 +228,10 @@ export class RawEditor extends SplitPanel {
   }
 
   /**
-   * Handle `'update-request'` messages.
-   */
-  protected onUpdateRequest(msg: Message): void {
-    const settings = this._settings;
-    const defaults = this._defaults;
-    const user = this._user;
-
-    if (settings) {
-      defaults.editor.refresh();
-      user.editor.refresh();
-    }
-  }
-
-  /**
    * Handle text changes in the underlying editor.
    */
   private _onTextChanged(): void {
-    const raw = this._user.editor.model.value.text;
+    const raw = this._user.editor.model.sharedModel.getSource();
     const settings = this._settings;
 
     this.removeClass(ERROR_CLASS);
@@ -283,8 +261,10 @@ export class RawEditor extends SplitPanel {
     const defaults = this._defaults;
     const user = this._user;
 
-    defaults.editor.model.value.text = settings.annotatedDefaults();
-    user.editor.model.value.text = settings.raw;
+    defaults.editor.model.sharedModel.setSource(
+      settings?.annotatedDefaults() ?? ''
+    );
+    user.editor.model.sharedModel.setSource(settings?.raw ?? '');
   }
 
   private _updateToolbar(revert = this._canRevert, save = this._canSave): void {
@@ -295,13 +275,14 @@ export class RawEditor extends SplitPanel {
     this._commandsChanged.emit([commands.revert, commands.save]);
   }
 
+  protected translator: ITranslator;
   private _canRevert = false;
   private _canSave = false;
   private _commands: RawEditor.ICommandBundle;
   private _commandsChanged = new Signal<this, string[]>(this);
   private _defaults: CodeEditorWrapper;
   private _inspector: Widget;
-  private _onSaveError: (reason: any) => void;
+  private _onSaveError: (reason: any, translator?: ITranslator) => void;
   private _settings: ISettingRegistry.ISettings | null = null;
   private _toolbar = new Toolbar<Widget>();
   private _user: CodeEditorWrapper;
@@ -348,7 +329,7 @@ export namespace RawEditor {
     /**
      * A function the raw editor calls on save errors.
      */
-    onSaveError: (reason: any) => void;
+    onSaveError: (reason: any, translator?: ITranslator) => void;
 
     /**
      * The setting registry used by the editor.
@@ -359,6 +340,11 @@ export namespace RawEditor {
      * The optional MIME renderer to use for rendering debug messages.
      */
     rendermime?: IRenderMimeRegistry;
+
+    /**
+     * The application language translator.
+     */
+    translator?: ITranslator;
   }
 }
 
@@ -369,13 +355,19 @@ namespace Private {
   /**
    * Returns the wrapped setting defaults editor.
    */
-  export function defaultsEditor(editor: Widget): Widget {
+  export function defaultsEditor(
+    editor: Widget,
+    translator?: ITranslator
+  ): Widget {
+    translator = translator || nullTranslator;
+    const trans = translator.load('jupyterlab');
     const widget = new Widget();
     const layout = (widget.layout = new BoxLayout({ spacing: 0 }));
     const banner = new Widget();
     const bar = new Toolbar();
+    const defaultTitle = trans.__('System Defaults');
 
-    banner.node.innerText = DEFAULT_TITLE;
+    banner.node.innerText = defaultTitle;
     bar.insertItem(0, 'banner', banner);
     layout.addWidget(bar);
     layout.addWidget(editor);
@@ -409,13 +401,17 @@ namespace Private {
   export function userEditor(
     editor: Widget,
     toolbar: Toolbar<Widget>,
-    inspector: Widget
+    inspector: Widget,
+    translator?: ITranslator
   ): Widget {
+    translator = translator || nullTranslator;
+    const trans = translator.load('jupyterlab');
+    const userTitle = trans.__('User Preferences');
     const widget = new Widget();
     const layout = (widget.layout = new BoxLayout({ spacing: 0 }));
     const banner = new Widget();
 
-    banner.node.innerText = USER_TITLE;
+    banner.node.innerText = userTitle;
     toolbar.insertItem(0, 'banner', banner);
     layout.addWidget(toolbar);
     layout.addWidget(editor);

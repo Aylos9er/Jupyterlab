@@ -1,26 +1,8 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import { PromiseDelegate, Token } from '@phosphor/coreutils';
-
-/* tslint:disable */
-/**
- * The default window resolver token.
- */
-export const IWindowResolver = new Token<IWindowResolver>(
-  '@jupyterlab/apputils:IWindowResolver'
-);
-/* tslint:enable */
-
-/**
- * The description of a window name resolver.
- */
-export interface IWindowResolver {
-  /**
-   * A window name to use as a handle among shared resources.
-   */
-  readonly name: string;
-}
+import { PromiseDelegate } from '@lumino/coreutils';
+import { IWindowResolver } from './tokens';
 
 /**
  * A concrete implementation of a window name resolver.
@@ -28,6 +10,9 @@ export interface IWindowResolver {
 export class WindowResolver implements IWindowResolver {
   /**
    * The resolved window name.
+   *
+   * #### Notes
+   * If the `resolve` promise has not resolved, the behavior is undefined.
    */
   get name(): string {
     return this._name;
@@ -51,7 +36,7 @@ export class WindowResolver implements IWindowResolver {
     });
   }
 
-  private _name: string | null = null;
+  private _name: string;
 }
 
 /*
@@ -61,7 +46,7 @@ namespace Private {
   /**
    * The internal prefix for private local storage keys.
    */
-  const PREFIX = '@jupyterlab/coreutils:StateDB';
+  const PREFIX = '@jupyterlab/statedb:StateDB';
 
   /**
    * The local storage beacon key.
@@ -104,12 +89,12 @@ namespace Private {
   /**
    * The window name promise.
    */
-  let delegate = new PromiseDelegate<string>();
+  const delegate = new PromiseDelegate<string>();
 
   /**
    * The known window names.
    */
-  let known: { [window: string]: null } = {};
+  const known: { [window: string]: null } = {};
 
   /**
    * The window name.
@@ -155,7 +140,7 @@ namespace Private {
       known[reported] = null;
 
       // If a reported window name and candidate collide, reject the candidate.
-      if (candidate in known) {
+      if (!candidate || candidate in known) {
         reject();
       }
     });
@@ -164,7 +149,7 @@ namespace Private {
   /**
    * Ping peers with payload.
    */
-  function ping(payload: string): void {
+  function ping(payload: string | null): void {
     if (payload === null) {
       return;
     }
@@ -209,7 +194,7 @@ namespace Private {
 
       // If the window name has not already been resolved, check one last time
       // to confirm it is not a duplicate before resolving.
-      if (candidate in known) {
+      if (!candidate || candidate in known) {
         return reject();
       }
 

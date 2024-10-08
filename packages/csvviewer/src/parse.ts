@@ -20,7 +20,7 @@ Possible options to add to the parser:
 /**
  * Interface for a delimiter-separated data parser.
  *
- * @param options: The parser options
+ * @param options The parser options
  * @returns An object giving the offsets for the rows or columns parsed.
  *
  * #### Notes
@@ -147,7 +147,7 @@ enum ROW_DELIMITER {
 /**
  * Parse delimiter-separated data.
  *
- * @param options: The parser options
+ * @param options The parser options
  * @returns An object giving the offsets for the rows or columns parsed.
  *
  * #### Notes
@@ -171,7 +171,7 @@ export function parseDSV(options: IParser.IOptions): IParser.IResults {
   let nrows = 0;
 
   // The row or column offsets we return.
-  let offsets = [];
+  const offsets = [];
 
   // Set up some useful local variables.
   const CH_DELIMITER = delimiter.charCodeAt(0);
@@ -401,9 +401,11 @@ export function parseDSV(options: IParser.IOptions): IParser.IResults {
       case NEW_ROW:
         nrows++;
 
-        // If we just parsed the first row and the ncols is undefined, set it to
-        // the number of columns we found in the first row.
-        if (nrows === 1 && ncols === undefined) {
+        // If ncols is undefined, set it to the number of columns in this row (first row implied).
+        if (ncols === undefined) {
+          if (nrows !== 1) {
+            throw new Error('Error parsing default number of columns');
+          }
           ncols = col;
         }
 
@@ -468,13 +470,13 @@ export function parseDSV(options: IParser.IOptions): IParser.IResults {
     }
   }
 
-  return { nrows, ncols: columnOffsets ? ncols : 0, offsets };
+  return { nrows, ncols: columnOffsets ? ncols ?? 0 : 0, offsets };
 }
 
 /**
  * Parse delimiter-separated data where no delimiter is quoted.
  *
- * @param options: The parser options
+ * @param options The parser options
  * @returns An object giving the offsets for the rows or columns parsed.
  *
  * #### Notes
@@ -498,13 +500,13 @@ export function parseDSVNoQuotes(options: IParser.IOptions): IParser.IResults {
   let ncols = options.ncols;
 
   // Set up our return variables.
-  let offsets: number[] = [];
+  const offsets: number[] = [];
   let nrows = 0;
 
   // Set up various state variables.
-  let rowDelimiterLength = rowDelimiter.length;
+  const rowDelimiterLength = rowDelimiter.length;
   let currRow = startIndex;
-  let len = data.length;
+  const len = data.length;
   let nextRow: number;
   let col: number;
   let rowString: string;
@@ -571,5 +573,5 @@ export function parseDSVNoQuotes(options: IParser.IOptions): IParser.IResults {
     currRow = rowEnd + rowDelimiterLength;
   }
 
-  return { nrows, ncols: columnOffsets ? ncols : 0, offsets };
+  return { nrows, ncols: columnOffsets ? ncols ?? 0 : 0, offsets };
 }

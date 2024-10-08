@@ -5,21 +5,22 @@ import { IWidgetTracker } from '@jupyterlab/apputils';
 
 import { IDocumentWidget } from '@jupyterlab/docregistry';
 
-import { Token } from '@phosphor/coreutils';
+import { Token } from '@lumino/coreutils';
 
 import { ImageViewer } from './widget';
 
 /**
- * A class that tracks editor widgets.
+ * A class that tracks image widgets.
  */
 export interface IImageTracker
   extends IWidgetTracker<IDocumentWidget<ImageViewer>> {}
 
-/* tslint:disable */
 /**
- * The editor tracker token.
+ * The image tracker token.
  */
 export const IImageTracker = new Token<IImageTracker>(
-  '@jupyterlab/imageviewer:IImageTracker'
+  '@jupyterlab/imageviewer:IImageTracker',
+  `A widget tracker for images.
+  Use this if you want to be able to iterate over and interact with images
+  viewed by the application.`
 );
-/* tslint:enable */

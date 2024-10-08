@@ -1,17 +1,13 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import React from 'react';
-
-import { VDomModel, VDomRenderer } from '@jupyterlab/apputils';
-
-import { IDocumentManager } from './tokens';
-
 import { DocumentRegistry } from '@jupyterlab/docregistry';
-
 import { TextItem } from '@jupyterlab/statusbar';
-
-import { Widget } from '@phosphor/widgets';
+import { ITranslator, nullTranslator } from '@jupyterlab/translation';
+import { VDomModel, VDomRenderer } from '@jupyterlab/ui-components';
+import { Widget } from '@lumino/widgets';
+import React from 'react';
+import { IDocumentManager } from './tokens';
 
 /**
  * A namespace for SavingStatusComponent statics.
@@ -22,9 +18,9 @@ namespace SavingStatusComponent {
    */
   export interface IProps {
     /**
-     * The current saving status.
+     * The current saving status, after translation.
      */
-    fileStatus: DocumentRegistry.SaveState | null;
+    fileStatus: string;
   }
 }
 
@@ -38,7 +34,7 @@ namespace SavingStatusComponent {
 function SavingStatusComponent(
   props: SavingStatusComponent.IProps
 ): React.ReactElement<SavingStatusComponent.IProps> {
-  return <TextItem source={`Saving ${props.fileStatus}`} />;
+  return <TextItem source={props.fileStatus} />;
 }
 
 /**
@@ -55,23 +51,32 @@ export class SavingStatus extends VDomRenderer<SavingStatus.Model> {
    * Create a new SavingStatus item.
    */
   constructor(opts: SavingStatus.IOptions) {
-    super();
-    this._docManager = opts.docManager;
-    this.model = new SavingStatus.Model(this._docManager);
+    super(new SavingStatus.Model(opts.docManager));
+    const translator = opts.translator || nullTranslator;
+    const trans = translator.load('jupyterlab');
+    this._statusMap = {
+      completed: trans.__('Saving completed'),
+      started: trans.__('Saving started'),
+      failed: trans.__('Saving failed')
+    };
   }
 
   /**
    * Render the SavingStatus item.
    */
-  render() {
+  render(): JSX.Element | null {
     if (this.model === null || this.model.status === null) {
       return null;
     } else {
-      return <SavingStatusComponent fileStatus={this.model.status} />;
+      return (
+        <SavingStatusComponent
+          fileStatus={this._statusMap[this.model.status]}
+        />
+      );
     }
   }
 
-  private _docManager: IDocumentManager;
+  private _statusMap: Record<DocumentRegistry.SaveState, string>;
 }
 
 /**
@@ -105,7 +110,7 @@ export namespace SavingStatus {
      * but it only has any effect if the widget is an IDocument widget
      * known to the application document manager.
      */
-    get widget() {
+    get widget(): Widget | null {
       return this._widget;
     }
     set widget(widget: Widget | null) {
@@ -114,6 +119,10 @@ export namespace SavingStatus {
         const oldContext = this._docManager.contextForWidget(oldWidget);
         if (oldContext) {
           oldContext.saveState.disconnect(this._onStatusChange);
+        } else if ((this._widget as any).content?.saveStateChanged) {
+          (this._widget as any).content.saveStateChanged.disconnect(
+            this._onStatusChange
+          );
         }
       }
 
@@ -124,6 +133,10 @@ export namespace SavingStatus {
         const widgetContext = this._docManager.contextForWidget(this._widget);
         if (widgetContext) {
           widgetContext.saveState.connect(this._onStatusChange);
+        } else if ((this._widget as any).content?.saveStateChanged) {
+          (this._widget as any).content.saveStateChanged.connect(
+            this._onStatusChange
+          );
         }
       }
     }
@@ -132,7 +145,7 @@ export namespace SavingStatus {
      * React to a saving status change from the current document widget.
      */
     private _onStatusChange = (
-      _documentModel: DocumentRegistry.IContext<DocumentRegistry.IModel>,
+      _: any,
       newStatus: DocumentRegistry.SaveState
     ) => {
       this._status = newStatus;
@@ -161,5 +174,10 @@ export namespace SavingStatus {
      * The application document manager.
      */
     docManager: IDocumentManager;
+
+    /**
+     * The application language translator.
+     */
+    translator?: ITranslator;
   }
 }

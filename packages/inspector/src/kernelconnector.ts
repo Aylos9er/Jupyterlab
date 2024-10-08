@@ -1,12 +1,9 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import { IClientSession } from '@jupyterlab/apputils';
-
-import { DataConnector } from '@jupyterlab/coreutils';
-
+import { ISessionContext } from '@jupyterlab/apputils';
 import { KernelMessage } from '@jupyterlab/services';
-
+import { DataConnector } from '@jupyterlab/statedb';
 import { InspectionHandler } from './handler';
 
 /**
@@ -20,11 +17,11 @@ export class KernelConnector extends DataConnector<
   /**
    * Create a new kernel connector for inspection requests.
    *
-   * @param options - The instatiation options for the kernel connector.
+   * @param options - The instantiation options for the kernel connector.
    */
   constructor(options: KernelConnector.IOptions) {
     super();
-    this._session = options.session;
+    this._sessionContext = options.sessionContext;
   }
 
   /**
@@ -35,7 +32,7 @@ export class KernelConnector extends DataConnector<
   fetch(
     request: InspectionHandler.IRequest
   ): Promise<InspectionHandler.IReply> {
-    const kernel = this._session.kernel;
+    const kernel = this._sessionContext.session?.kernel;
 
     if (!kernel) {
       return Promise.reject(new Error('Inspection fetch requires a kernel.'));
@@ -44,7 +41,7 @@ export class KernelConnector extends DataConnector<
     const contents: KernelMessage.IInspectRequestMsg['content'] = {
       code: request.text,
       cursor_pos: request.offset,
-      detail_level: 0
+      detail_level: 1
     };
 
     return kernel.requestInspect(contents).then(msg => {
@@ -58,7 +55,7 @@ export class KernelConnector extends DataConnector<
     });
   }
 
-  private _session: IClientSession;
+  private _sessionContext: ISessionContext;
 }
 
 /**
@@ -70,8 +67,8 @@ export namespace KernelConnector {
    */
   export interface IOptions {
     /**
-     * The session used to make API requests to the kernel.
+     * The session context used to make API requests to the kernel.
      */
-    session: IClientSession;
+    sessionContext: ISessionContext;
   }
 }

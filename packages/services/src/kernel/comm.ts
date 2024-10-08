@@ -1,13 +1,13 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import { JSONObject } from '@phosphor/coreutils';
+import { JSONObject } from '@lumino/coreutils';
 
-import { DisposableDelegate } from '@phosphor/disposable';
+import { DisposableDelegate } from '@lumino/disposable';
 
-import { Kernel } from './kernel';
+import * as Kernel from './kernel';
 
-import { KernelMessage } from './messages';
+import * as KernelMessage from './messages';
 
 /**
  * Comm channel handler.
@@ -19,7 +19,7 @@ export class CommHandler extends DisposableDelegate implements Kernel.IComm {
   constructor(
     target: string,
     id: string,
-    kernel: Kernel.IKernel,
+    kernel: Kernel.IKernelConnection,
     disposeCb: () => void
   ) {
     super(disposeCb);
@@ -107,7 +107,7 @@ export class CommHandler extends DisposableDelegate implements Kernel.IComm {
     if (this.isDisposed || this._kernel.isDisposed) {
       throw new Error('Cannot open');
     }
-    let msg = KernelMessage.createMessage({
+    const msg = KernelMessage.createMessage({
       msgType: 'comm_open',
       channel: 'shell',
       username: this._kernel.username,
@@ -115,7 +115,7 @@ export class CommHandler extends DisposableDelegate implements Kernel.IComm {
       content: {
         comm_id: this._id,
         target_name: this._target,
-        data: data || {}
+        data: data ?? {}
       },
       metadata,
       buffers
@@ -140,7 +140,7 @@ export class CommHandler extends DisposableDelegate implements Kernel.IComm {
     if (this.isDisposed || this._kernel.isDisposed) {
       throw new Error('Cannot send');
     }
-    let msg = KernelMessage.createMessage({
+    const msg = KernelMessage.createMessage({
       msgType: 'comm_msg',
       channel: 'shell',
       username: this._kernel.username,
@@ -152,7 +152,7 @@ export class CommHandler extends DisposableDelegate implements Kernel.IComm {
       metadata,
       buffers
     });
-    return this._kernel.sendShellMessage(msg, false, true);
+    return this._kernel.sendShellMessage(msg, false, disposeOnDone);
   }
 
   /**
@@ -174,36 +174,36 @@ export class CommHandler extends DisposableDelegate implements Kernel.IComm {
     if (this.isDisposed || this._kernel.isDisposed) {
       throw new Error('Cannot close');
     }
-    let msg = KernelMessage.createMessage({
+    const msg = KernelMessage.createMessage({
       msgType: 'comm_close',
       channel: 'shell',
       username: this._kernel.username,
       session: this._kernel.clientId,
       content: {
         comm_id: this._id,
-        data: data || {}
+        data: data ?? {}
       },
       metadata,
       buffers
     });
-    let future = this._kernel.sendShellMessage(msg, false, true);
-    let onClose = this._onClose;
+    const future = this._kernel.sendShellMessage(msg, false, true);
+    const onClose = this._onClose;
     if (onClose) {
-      let ioMsg = KernelMessage.createMessage({
+      const ioMsg = KernelMessage.createMessage({
         msgType: 'comm_close',
         channel: 'iopub',
         username: this._kernel.username,
         session: this._kernel.clientId,
         content: {
           comm_id: this._id,
-          data: data || {}
+          data: data ?? {}
         },
         metadata,
         buffers
       });
       // In the future, we may want to communicate back to the user the possible
       // promise returned from onClose.
-      onClose(ioMsg);
+      void onClose(ioMsg);
     }
     this.dispose();
     return future;
@@ -211,7 +211,7 @@ export class CommHandler extends DisposableDelegate implements Kernel.IComm {
 
   private _target = '';
   private _id = '';
-  private _kernel: Kernel.IKernel;
+  private _kernel: Kernel.IKernelConnection;
   private _onClose: (
     msg: KernelMessage.ICommCloseMsg<'iopub'>
   ) => void | PromiseLike<void>;

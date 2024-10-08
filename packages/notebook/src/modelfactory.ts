@@ -1,35 +1,38 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import { CodeCellModel } from '@jupyterlab/cells';
-
+import type { ISharedNotebook } from '@jupyter/ydoc';
 import { DocumentRegistry } from '@jupyterlab/docregistry';
-
-import { IModelDB } from '@jupyterlab/observables';
-
 import { Contents } from '@jupyterlab/services';
-
 import { INotebookModel, NotebookModel } from './model';
 
 /**
  * A model factory for notebooks.
  */
 export class NotebookModelFactory
-  implements DocumentRegistry.IModelFactory<INotebookModel> {
+  implements DocumentRegistry.IModelFactory<INotebookModel>
+{
   /**
    * Construct a new notebook model factory.
    */
-  constructor(options: NotebookModelFactory.IOptions) {
-    let codeCellContentFactory = options.codeCellContentFactory;
-    this.contentFactory =
-      options.contentFactory ||
-      new NotebookModel.ContentFactory({ codeCellContentFactory });
+  constructor(options: NotebookModelFactory.IOptions = {}) {
+    this._disableDocumentWideUndoRedo =
+      options.disableDocumentWideUndoRedo ?? true;
+    this._collaborative = options.collaborative ?? true;
   }
 
   /**
-   * The content model factory used by the NotebookModelFactory.
+   * Define the disableDocumentWideUndoRedo property.
+   *
+   * @experimental
+   * @alpha
    */
-  readonly contentFactory: NotebookModel.IContentFactory;
+  get disableDocumentWideUndoRedo(): boolean {
+    return this._disableDocumentWideUndoRedo;
+  }
+  set disableDocumentWideUndoRedo(disableDocumentWideUndoRedo: boolean) {
+    this._disableDocumentWideUndoRedo = disableDocumentWideUndoRedo;
+  }
 
   /**
    * The name of the model.
@@ -53,6 +56,13 @@ export class NotebookModelFactory
   }
 
   /**
+   * Whether the model is collaborative or not.
+   */
+  get collaborative(): boolean {
+    return this._collaborative;
+  }
+
+  /**
    * Get whether the model factory has been disposed.
    */
   get isDisposed(): boolean {
@@ -69,13 +79,19 @@ export class NotebookModelFactory
   /**
    * Create a new model for a given path.
    *
-   * @param languagePreference - An optional kernel language preference.
+   * @param options Model options.
    *
    * @returns A new document model.
    */
-  createNew(languagePreference?: string, modelDB?: IModelDB): INotebookModel {
-    let contentFactory = this.contentFactory;
-    return new NotebookModel({ languagePreference, contentFactory, modelDB });
+  createNew(
+    options: DocumentRegistry.IModelOptions<ISharedNotebook> = {}
+  ): INotebookModel {
+    return new NotebookModel({
+      languagePreference: options.languagePreference,
+      sharedModel: options.sharedModel,
+      collaborationEnabled: options.collaborationEnabled && this.collaborative,
+      disableDocumentWideUndoRedo: this._disableDocumentWideUndoRedo
+    });
   }
 
   /**
@@ -85,7 +101,12 @@ export class NotebookModelFactory
     return '';
   }
 
+  /**
+   * Defines if the document can be undo/redo.
+   */
+  private _disableDocumentWideUndoRedo: boolean;
   private _disposed = false;
+  private _collaborative: boolean;
 }
 
 /**
@@ -97,14 +118,18 @@ export namespace NotebookModelFactory {
    */
   export interface IOptions {
     /**
-     * The factory for code cell content.
+     * Whether the model is collaborative or not.
      */
-    codeCellContentFactory?: CodeCellModel.IContentFactory;
+    collaborative?: boolean;
 
     /**
-     * The content factory used by the NotebookModelFactory.  If
-     * given, it will supersede the `codeCellContentFactory`.
+     * Defines if the document can be undo/redo.
+     *
+     * Default: true
+     *
+     * @experimental
+     * @alpha
      */
-    contentFactory?: NotebookModel.IContentFactory;
+    disableDocumentWideUndoRedo?: boolean;
   }
 }

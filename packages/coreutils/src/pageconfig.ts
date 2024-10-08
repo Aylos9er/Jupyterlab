@@ -1,17 +1,15 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import { JSONExt } from '@phosphor/coreutils';
-
+import { JSONExt } from '@lumino/coreutils';
 import minimist from 'minimist';
-
 import { URLExt } from './url';
 
 /**
  * Declare stubs for the node variables.
  */
-declare var process: any;
-declare var require: any;
+declare let process: any;
+declare let require: any;
 
 /**
  * The namespace for `PageConfig` functions.
@@ -54,7 +52,7 @@ export namespace PageConfig {
       }
     }
     // Otherwise use CLI if given.
-    if (!found && typeof process !== 'undefined') {
+    if (!found && typeof process !== 'undefined' && process.argv) {
       try {
         const cli = minimist(process.argv.slice(2));
         const path: any = require('path');
@@ -65,10 +63,9 @@ export namespace PageConfig {
           fullPath = path.resolve(process.env['JUPYTER_CONFIG_DATA']);
         }
         if (fullPath) {
-          /* tslint:disable */
           // Force Webpack to ignore this require.
+          // eslint-disable-next-line
           configData = eval('require')(fullPath) as { [key: string]: string };
-          /* tslint:enable */
         }
       } catch (e) {
         console.error(e);
@@ -78,7 +75,7 @@ export namespace PageConfig {
     if (!JSONExt.isObject(configData)) {
       configData = Object.create(null);
     } else {
-      for (let key in configData) {
+      for (const key in configData) {
         // PageConfig expects strings
         if (typeof configData[key] !== 'string') {
           configData[key] = JSON.stringify(configData[key]);
@@ -115,6 +112,84 @@ export namespace PageConfig {
    */
   export function getTreeUrl(): string {
     return URLExt.join(getBaseUrl(), getOption('treeUrl'));
+  }
+
+  /**
+   * Get the base url for sharing links (usually baseUrl)
+   */
+  export function getShareUrl(): string {
+    return URLExt.normalize(getOption('shareUrl') || getBaseUrl());
+  }
+
+  /**
+   * Get the tree url for shareable links.
+   * Usually the same as treeUrl,
+   * but overrideable e.g. when sharing with JupyterHub.
+   */
+  export function getTreeShareUrl(): string {
+    return URLExt.normalize(URLExt.join(getShareUrl(), getOption('treeUrl')));
+  }
+
+  /**
+   * Create a new URL given an optional mode and tree path.
+   *
+   * This is used to create URLS when the mode or tree path change as the user
+   * changes mode or the current document in the main area. If fields in
+   * options are omitted, the value in PageConfig will be used.
+   *
+   * @param options - IGetUrlOptions for the new path.
+   */
+  export function getUrl(options: IGetUrlOptions): string {
+    let path = options.toShare ? getShareUrl() : getBaseUrl();
+    const mode = options.mode ?? getOption('mode');
+    const workspace = options.workspace ?? getOption('workspace');
+    const labOrDoc = mode === 'single-document' ? 'doc' : 'lab';
+    path = URLExt.join(path, labOrDoc);
+    if (workspace !== defaultWorkspace) {
+      path = URLExt.join(
+        path,
+        'workspaces',
+        encodeURIComponent(getOption('workspace') ?? defaultWorkspace)
+      );
+    }
+    const treePath = options.treePath ?? getOption('treePath');
+    if (treePath) {
+      path = URLExt.join(path, 'tree', URLExt.encodeParts(treePath));
+    }
+    return path;
+  }
+
+  export const defaultWorkspace: string = 'default';
+
+  /**
+   * Options for getUrl
+   */
+
+  export interface IGetUrlOptions {
+    /**
+     * The optional mode as a string 'single-document' or 'multiple-document'. If
+     * the mode argument is missing, it will be provided from the PageConfig.
+     */
+    mode?: string;
+
+    /**
+     * The optional workspace as a string. If this argument is missing, the value will
+     * be pulled from PageConfig. To use the default workspace (no /workspaces/<name>
+     * URL segment will be included) pass the string PageConfig.defaultWorkspace.
+     */
+    workspace?: string;
+
+    /**
+     * Whether the url is meant to be shared or not; default false.
+     */
+    toShare?: boolean;
+
+    /**
+     * The optional tree path as as string. If treePath is not provided it will be
+     * provided from the PageConfig. If an empty string, the resulting path will not
+     * contain a tree portion.
+     */
+    treePath?: string;
   }
 
   /**
@@ -185,7 +260,7 @@ export namespace PageConfig {
     if (typeof document === 'undefined' || !document.body) {
       return '';
     }
-    let val = document.body.dataset[key];
+    const val = document.body.dataset[key];
     if (typeof val === 'undefined') {
       return '';
     }
@@ -204,13 +279,11 @@ export namespace PageConfig {
      * #### Notes
      * This is intended for `deferredExtensions` and `disabledExtensions`.
      */
-    function populate(key: string): { raw: string; rule: RegExp }[] {
+    function populate(key: string): string[] {
       try {
         const raw = getOption(key);
         if (raw) {
-          return JSON.parse(raw).map((pattern: string) => {
-            return { raw: pattern, rule: new RegExp(pattern) };
-          });
+          return JSON.parse(raw);
         }
       } catch (error) {
         console.warn(`Unable to parse ${key}.`, error);
@@ -234,7 +307,14 @@ export namespace PageConfig {
      * @param id - The plugin ID.
      */
     export function isDeferred(id: string): boolean {
-      return deferred.some(val => val.raw === id || val.rule.test(id));
+      // Check for either a full plugin id match or an extension
+      // name match.
+      const separatorIndex = id.indexOf(':');
+      let extName = '';
+      if (separatorIndex !== -1) {
+        extName = id.slice(0, separatorIndex);
+      }
+      return deferred.some(val => val === id || (extName && val === extName));
     }
 
     /**
@@ -243,7 +323,14 @@ export namespace PageConfig {
      * @param id - The plugin ID.
      */
     export function isDisabled(id: string): boolean {
-      return disabled.some(val => val.raw === id || val.rule.test(id));
+      // Check for either a full plugin id match or an extension
+      // name match.
+      const separatorIndex = id.indexOf(':');
+      let extName = '';
+      if (separatorIndex !== -1) {
+        extName = id.slice(0, separatorIndex);
+      }
+      return disabled.some(val => val === id || (extName && val === extName));
     }
   }
 }

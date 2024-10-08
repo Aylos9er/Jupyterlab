@@ -1,7 +1,10 @@
+.. Copyright (c) Jupyter Development Team.
+.. Distributed under the terms of the Modified BSD License.
+
 .. _code-console:
 
 Code Consoles
--------------
+=============
 
 Code consoles enable you to run code interactively in a kernel. The cells
 of a code console show the order in which code was executed in the

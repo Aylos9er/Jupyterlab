@@ -1,23 +1,20 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import { nbformat, IChangedArgs } from '@jupyterlab/coreutils';
-
-import { IRenderMimeRegistry } from '@jupyterlab/rendermime';
-
+import { IChangedArgs } from '@jupyterlab/coreutils';
+import * as nbformat from '@jupyterlab/nbformat';
 import { IOutputAreaModel } from '@jupyterlab/outputarea';
+import { IRenderMimeRegistry } from '@jupyterlab/rendermime';
+import { Token } from '@lumino/coreutils';
+import { IDisposable } from '@lumino/disposable';
+import { ISignal } from '@lumino/signaling';
 
-import { Token } from '@phosphor/coreutils';
-
-import { ISignal } from '@phosphor/signaling';
-import { IDisposable } from '@phosphor/disposable';
-
-/* tslint:disable */
 /**
  * The Logger Registry token.
  */
 export const ILoggerRegistry = new Token<ILoggerRegistry>(
-  '@jupyterlab/logconsole:ILoggerRegistry'
+  '@jupyterlab/logconsole:ILoggerRegistry',
+  'A service providing a logger infrastructure.'
 );
 
 export type ILoggerRegistryChange = 'append';
@@ -122,8 +119,12 @@ export type ILogPayload = ITextLog | IHtmlLog | IOutputLog;
 export type IContentChange = 'append' | 'clear';
 
 export type IStateChange =
-  | IChangedArgs<IRenderMimeRegistry, 'rendermime'>
-  | IChangedArgs<LogLevel, 'level'>;
+  | IChangedArgs<
+      IRenderMimeRegistry | null,
+      IRenderMimeRegistry | null,
+      'rendermime'
+    >
+  | IChangedArgs<LogLevel, LogLevel, 'level'>;
 
 export interface ILoggerOutputAreaModel extends IOutputAreaModel {
   /**
@@ -151,7 +152,7 @@ export interface ILogger extends IDisposable {
   /**
    * Rendermime to use when rendering outputs logged.
    */
-  rendermime: IRenderMimeRegistry;
+  rendermime: IRenderMimeRegistry | null;
   /**
    * A signal emitted when the log model changes.
    */

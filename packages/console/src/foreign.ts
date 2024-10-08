@@ -1,17 +1,12 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import { IClientSession } from '@jupyterlab/apputils';
-
+import { ISessionContext } from '@jupyterlab/apputils';
 import { CodeCell } from '@jupyterlab/cells';
-
-import { nbformat } from '@jupyterlab/coreutils';
-
+import * as nbformat from '@jupyterlab/nbformat';
 import { KernelMessage } from '@jupyterlab/services';
-
-import { IDisposable } from '@phosphor/disposable';
-
-import { Signal } from '@phosphor/signaling';
+import { IDisposable } from '@lumino/disposable';
+import { Signal } from '@lumino/signaling';
 
 const FOREIGN_CELL_CLASS = 'jp-CodeConsole-foreignCell';
 
@@ -24,8 +19,8 @@ export class ForeignHandler implements IDisposable {
    * Construct a new foreign message handler.
    */
   constructor(options: ForeignHandler.IOptions) {
-    this.session = options.session;
-    this.session.iopubMessage.connect(this.onIOPubMessage, this);
+    this.sessionContext = options.sessionContext;
+    this.sessionContext.iopubMessage.connect(this.onIOPubMessage, this);
     this._parent = options.parent;
   }
 
@@ -42,7 +37,7 @@ export class ForeignHandler implements IDisposable {
   /**
    * The client session used by the foreign handler.
    */
-  readonly session: IClientSession;
+  readonly sessionContext: ISessionContext;
 
   /**
    * The foreign handler's parent receiver.
@@ -76,42 +71,43 @@ export class ForeignHandler implements IDisposable {
    * previously injected cell being updated and `false` for all other messages.
    */
   protected onIOPubMessage(
-    sender: IClientSession,
+    sender: ISessionContext,
     msg: KernelMessage.IIOPubMessage
   ): boolean {
     // Only process messages if foreign cell injection is enabled.
     if (!this._enabled) {
       return false;
     }
-    let kernel = this.session.kernel;
+    const kernel = this.sessionContext.session?.kernel;
     if (!kernel) {
       return false;
     }
 
     // Check whether this message came from an external session.
-    let parent = this._parent;
-    let session = (msg.parent_header as KernelMessage.IHeader).session;
+    const parent = this._parent;
+    const session = (msg.parent_header as KernelMessage.IHeader).session;
     if (session === kernel.clientId) {
       return false;
     }
-    let msgType = msg.header.msg_type;
-    let parentHeader = msg.parent_header as KernelMessage.IHeader;
-    let parentMsgId = parentHeader.msg_id as string;
+    const msgType = msg.header.msg_type;
+    const parentHeader = msg.parent_header as KernelMessage.IHeader;
+    const parentMsgId = parentHeader.msg_id as string;
     let cell: CodeCell | undefined;
     switch (msgType) {
-      case 'execute_input':
-        let inputMsg = msg as KernelMessage.IExecuteInputMsg;
+      case 'execute_input': {
+        const inputMsg = msg as KernelMessage.IExecuteInputMsg;
         cell = this._newCell(parentMsgId);
-        let model = cell.model;
+        const model = cell.model;
         model.executionCount = inputMsg.content.execution_count;
-        model.value.text = inputMsg.content.code;
+        model.sharedModel.setSource(inputMsg.content.code);
         model.trusted = true;
         parent.update();
         return true;
+      }
       case 'execute_result':
       case 'display_data':
       case 'stream':
-      case 'error':
+      case 'error': {
         cell = this._parent.getCell(parentMsgId);
         if (!cell) {
           return false;
@@ -123,13 +119,15 @@ export class ForeignHandler implements IDisposable {
         cell.model.outputs.add(output);
         parent.update();
         return true;
-      case 'clear_output':
-        let wait = (msg as KernelMessage.IClearOutputMsg).content.wait;
+      }
+      case 'clear_output': {
+        const wait = (msg as KernelMessage.IClearOutputMsg).content.wait;
         cell = this._parent.getCell(parentMsgId);
         if (cell) {
           cell.model.outputs.clear(wait);
         }
         return true;
+      }
       default:
         return false;
     }
@@ -139,7 +137,7 @@ export class ForeignHandler implements IDisposable {
    * Create a new code cell for an input originated from a foreign session.
    */
   private _newCell(parentMsgId: string): CodeCell {
-    let cell = this.parent.createCodeCell();
+    const cell = this.parent.createCodeCell();
     cell.addClass(FOREIGN_CELL_CLASS);
     this._parent.addCell(cell, parentMsgId);
     return cell;
@@ -161,7 +159,7 @@ export namespace ForeignHandler {
     /**
      * The client session used by the foreign handler.
      */
-    session: IClientSession;
+    sessionContext: ISessionContext;
 
     /**
      * The parent into which the handler will inject code cells.
@@ -191,6 +189,6 @@ export namespace ForeignHandler {
     /**
      * Get a cell associated with a message id.
      */
-    getCell(msgId: string): CodeCell;
+    getCell(msgId: string): CodeCell | undefined;
   }
 }

@@ -1,41 +1,40 @@
-import os
-import warnings
+"""A JupyterHub EntryPoint that defaults to use JupyterLab"""
 
+# Copyright (c) Jupyter Development Team.
+# Distributed under the terms of the Modified BSD License.
+
+import os
+
+from jupyter_server.serverapp import ServerApp
 from traitlets import default
 
 from .labapp import LabApp
 
+if not os.environ.get("JUPYTERHUB_SINGLEUSER_APP"):
+    # setting this env prior to import of jupyterhub.singleuser avoids unnecessary import of notebook
+    os.environ["JUPYTERHUB_SINGLEUSER_APP"] = "jupyter_server.serverapp.ServerApp"
+
 try:
-    from jupyterhub.singleuser import SingleUserNotebookApp
+    from jupyterhub.singleuser.mixins import make_singleuser_app
 except ImportError:
-    SingleUserLabApp = None
-    raise ImportError('You must have jupyterhub installed for this to work.')
+    # backward-compat with jupyterhub < 1.3
+    from jupyterhub.singleuser import SingleUserNotebookApp as SingleUserServerApp
 else:
-    class SingleUserLabApp(SingleUserNotebookApp, LabApp):
+    SingleUserServerApp = make_singleuser_app(ServerApp)
+
+
+class SingleUserLabApp(SingleUserServerApp):
+    @default("default_url")
+    def _default_url(self):
+        return "/lab"
+
+    def find_server_extensions(self):
+        """unconditionally enable jupyterlab server extension
+
+        never called if using legacy SingleUserNotebookApp
         """
-        A sublcass of JupyterHub's SingleUserNotebookApp which includes LabApp
-        as a mixin. This makes the LabApp configurables available to the spawned
-        jupyter server.
-
-        If you don't need to change any of the configurables from their default
-        values, then this class is not necessary, and you can deploy JupyterLab
-        by ensuring that its server extension is enabled and setting the
-        `Spawner.default_url` to '/lab'.
-
-        If you do need to configure JupyterLab, then use this application by
-        setting `Spawner.cmd = ['jupyter-labhub']`.
-        """
-        @default("default_url")
-        def _default_url(self):
-            """when using jupyter-labhub, jupyterlab is default ui"""
-            return "/lab"
-
-        def init_webapp(self, *args, **kwargs):
-            warnings.warn(
-                "SingleUserLabApp is deprecated, use SingleUserNotebookApp and set " + \
-                "c.Spawner.default_url = '/lab' in jupyterhub_config.py", DeprecationWarning
-            )
-            super().init_webapp(*args, **kwargs)
+        super().find_server_extensions()
+        self.jpserver_extensions[LabApp.get_extension_package()] = True
 
 
 def main(argv=None):

@@ -13,9 +13,6 @@
       "path": "../codeeditor"
     },
     {
-      "path": "../codemirror"
-    },
-    {
       "path": "../coreutils"
     },
     {
@@ -29,6 +26,12 @@
     },
     {
       "path": "../services"
+    },
+    {
+      "path": "../translation"
+    },
+    {
+      "path": "../ui-components"
     }
   ]
 }

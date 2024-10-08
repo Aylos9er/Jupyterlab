@@ -2,28 +2,26 @@
 // Distributed under the terms of the Modified BSD License.
 
 import { showErrorMessage } from '@jupyterlab/apputils';
-
 import { ActivityMonitor } from '@jupyterlab/coreutils';
-
 import {
   ABCWidgetFactory,
   DocumentRegistry,
   DocumentWidget
 } from '@jupyterlab/docregistry';
-
 import {
   IRenderMime,
   IRenderMimeRegistry,
   MimeModel
 } from '@jupyterlab/rendermime';
-
-import { PromiseDelegate } from '@phosphor/coreutils';
-
-import { Message } from '@phosphor/messaging';
-
-import { JSONObject } from '@phosphor/coreutils';
-
-import { StackedLayout, Widget } from '@phosphor/widgets';
+import {
+  ITranslator,
+  nullTranslator,
+  TranslationBundle
+} from '@jupyterlab/translation';
+import { JSONObject, PromiseDelegate } from '@lumino/coreutils';
+import { Message } from '@lumino/messaging';
+import { ISignal, Signal } from '@lumino/signaling';
+import { StackedLayout, Widget } from '@lumino/widgets';
 
 /**
  * The class name added to a markdown viewer.
@@ -45,8 +43,10 @@ export class MarkdownViewer extends Widget {
   constructor(options: MarkdownViewer.IOptions) {
     super();
     this.context = options.context;
+    this.translator = options.translator || nullTranslator;
+    this._trans = this.translator.load('jupyterlab');
     this.renderer = options.renderer;
-    this.node.tabIndex = -1;
+    this.node.tabIndex = 0;
     this.addClass(MARKDOWNVIEWER_CLASS);
 
     const layout = (this.layout = new StackedLayout());
@@ -74,9 +74,16 @@ export class MarkdownViewer extends Widget {
   }
 
   /**
+   * Signal emitted when the content has been rendered.
+   */
+  get rendered(): ISignal<MarkdownViewer, void> {
+    return this._rendered;
+  }
+
+  /**
    * Set URI fragment identifier.
    */
-  setFragment(fragment: string) {
+  setFragment(fragment: string): void {
     this._fragment = fragment;
     this.update();
   }
@@ -95,24 +102,27 @@ export class MarkdownViewer extends Widget {
     const { style } = this.renderer.node;
     switch (option) {
       case 'fontFamily':
-        style.fontFamily = value as string | null;
+        style.setProperty('font-family', value as string | null);
         break;
       case 'fontSize':
-        style.fontSize = value ? value + 'px' : null;
+        style.setProperty('font-size', value ? value + 'px' : null);
         break;
       case 'hideFrontMatter':
         this.update();
         break;
       case 'lineHeight':
-        style.lineHeight = value ? value.toString() : null;
+        style.setProperty('line-height', value ? value.toString() : null);
         break;
-      case 'lineWidth':
+      case 'lineWidth': {
         const padding = value ? `calc(50% - ${(value as number) / 2}ch)` : null;
-        style.paddingLeft = padding;
-        style.paddingRight = padding;
+        style.setProperty('padding-left', padding);
+        style.setProperty('padding-right', padding);
         break;
+      }
       case 'renderTimeout':
-        this._monitor.timeout = value as number;
+        if (this._monitor) {
+          this._monitor.timeout = value as number;
+        }
         break;
       default:
         break;
@@ -189,25 +199,32 @@ export class MarkdownViewer extends Widget {
       // If there is an outstanding request to render, go ahead and render
       if (this._renderRequested) {
         return this._render();
+      } else {
+        this._rendered.emit();
       }
     } catch (reason) {
       // Dispose the document if rendering fails.
       requestAnimationFrame(() => {
         this.dispose();
       });
-      void showErrorMessage(`Renderer Failure: ${context.path}`, reason);
+      void showErrorMessage(
+        this._trans.__('Renderer Failure: %1', context.path),
+        reason
+      );
     }
   }
 
   readonly context: DocumentRegistry.Context;
   readonly renderer: IRenderMime.IRenderer;
-
+  protected translator: ITranslator;
+  private _trans: TranslationBundle;
   private _config = { ...MarkdownViewer.defaultConfig };
   private _fragment = '';
   private _monitor: ActivityMonitor<DocumentRegistry.IModel, void> | null;
   private _ready = new PromiseDelegate<void>();
   private _isRendering = false;
   private _renderRequested = false;
+  private _rendered = new Signal<MarkdownViewer, void>(this);
 }
 
 /**
@@ -227,6 +244,11 @@ export namespace MarkdownViewer {
      * The renderer instance.
      */
     renderer: IRenderMime.IRenderer;
+
+    /**
+     * The application language translator.
+     */
+    translator?: ITranslator;
   }
 
   export interface IConfig {
@@ -251,7 +273,7 @@ export namespace MarkdownViewer {
     lineWidth: number | null;
 
     /**
-     * Whether to hide the YALM front matter.
+     * Whether to hide the YAML front matter.
      */
     hideFrontMatter: boolean;
 
@@ -288,7 +310,7 @@ export class MarkdownDocument extends DocumentWidget<MarkdownViewer> {
  */
 export class MarkdownViewerFactory extends ABCWidgetFactory<MarkdownDocument> {
   /**
-   * Construct a new mimetype widget factory.
+   * Construct a new markdown viewer widget factory.
    */
   constructor(options: MarkdownViewerFactory.IOptions) {
     super(Private.createRegistryOptions(options));
@@ -307,29 +329,31 @@ export class MarkdownViewerFactory extends ABCWidgetFactory<MarkdownDocument> {
     });
     const renderer = rendermime.createRenderer(MIMETYPE);
     const content = new MarkdownViewer({ context, renderer });
-    content.title.iconClass = this._fileType.iconClass;
-    content.title.iconLabel = this._fileType.iconLabel;
+    content.title.icon = this._fileType?.icon;
+    content.title.iconClass = this._fileType?.iconClass ?? '';
+    content.title.iconLabel = this._fileType?.iconLabel ?? '';
+    content.title.caption = this.label;
     const widget = new MarkdownDocument({ content, context });
 
     return widget;
   }
 
-  private _fileType: DocumentRegistry.IFileType;
+  private _fileType: DocumentRegistry.IFileType | undefined;
   private _rendermime: IRenderMimeRegistry;
 }
 
 /**
- * The namespace for MimeDocumentFactory class statics.
+ * The namespace for MarkdownViewerFactory class statics.
  */
 export namespace MarkdownViewerFactory {
   /**
-   * The options used to initialize a MimeDocumentFactory.
+   * The options used to initialize a MarkdownViewerFactory.
    */
   export interface IOptions extends DocumentRegistry.IWidgetFactoryOptions {
     /**
      * The primary file type associated with the document.
      */
-    primaryFileType: DocumentRegistry.IFileType;
+    primaryFileType: DocumentRegistry.IFileType | undefined;
 
     /**
      * The rendermime instance.
@@ -355,7 +379,7 @@ namespace Private {
   }
 
   /**
-   * Remove YALM front matter from source.
+   * Remove YAML front matter from source.
    */
   export function removeFrontMatter(source: string): string {
     const re = /^---\n[^]*?\n(---|...)\n/;

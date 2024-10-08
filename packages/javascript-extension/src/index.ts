@@ -1,8 +1,12 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
+/**
+ * @packageDocumentation
+ * @module javascript-extension
+ */
 
-import { IRenderMime } from '@jupyterlab/rendermime-interfaces';
 import { RenderedJavaScript } from '@jupyterlab/rendermime';
+import { IRenderMime } from '@jupyterlab/rendermime-interfaces';
 
 export const TEXT_JAVASCRIPT_MIMETYPE = 'text/javascript';
 export const APPLICATION_JAVASCRIPT_MIMETYPE = 'application/javascript';
@@ -13,16 +17,19 @@ function evalInContext(
   document: Document,
   window: Window
 ) {
-  // tslint:disable-next-line
+  // eslint-disable-next-line
   return eval(code);
 }
 
 export class ExperimentalRenderedJavascript extends RenderedJavaScript {
   render(model: IRenderMime.IMimeModel): Promise<void> {
+    const trans = this.translator.load('jupyterlab');
     const renderJavascript = () => {
       try {
-        const data = model.data[this.mimeType] as string;
-        evalInContext(data, this.node, document, window);
+        const data = model.data[this.mimeType] as string | undefined;
+        if (data) {
+          evalInContext(data, this.node, document, window);
+        }
         return Promise.resolve();
       } catch (error) {
         return Promise.reject(error);
@@ -31,10 +38,11 @@ export class ExperimentalRenderedJavascript extends RenderedJavaScript {
     if (!model.trusted) {
       // If output is not trusted or if arbitrary Javascript execution is not enabled, render an informative error message
       const pre = document.createElement('pre');
-      pre.textContent =
-        'Are you sure that you want to run arbitrary Javascript within your JupyterLab session?';
+      pre.textContent = trans.__(
+        'Are you sure that you want to run arbitrary Javascript within your JupyterLab session?'
+      );
       const button = document.createElement('button');
-      button.textContent = 'Run';
+      button.textContent = trans.__('Run');
 
       this.node.appendChild(pre);
       this.node.appendChild(button);
@@ -60,6 +68,7 @@ export const rendererFactory: IRenderMime.IRendererFactory = {
 
 const extension: IRenderMime.IExtension = {
   id: '@jupyterlab/javascript-extension:factory',
+  description: 'Adds renderer for JavaScript content.',
   rendererFactory,
   rank: 0,
   dataType: 'string'

@@ -3,12 +3,6 @@
 
 import * as React from 'react';
 
-import { style, classes } from 'typestyle/lib';
-
-import { centeredFlex, leftToRight } from '../style/layout';
-
-const groupItemLayout = style(centeredFlex, leftToRight);
-
 /**
  * A tsx component for a set of items logically grouped together.
  */
@@ -19,7 +13,7 @@ export function GroupItem(
   const numChildren = React.Children.count(children);
 
   return (
-    <div className={classes(groupItemLayout, className)} {...rest}>
+    <div className={`jp-StatusBar-GroupItem ${className || ''}`} {...rest}>
       {React.Children.map(children, (child, i) => {
         if (i === 0) {
           return <div style={{ marginRight: `${spacing}px` }}>{child}</div>;
@@ -42,7 +36,7 @@ export namespace GroupItem {
    */
   export interface IProps {
     /**
-     * The spacing, in px, between the items in the goup.
+     * The spacing, in px, between the items in the group.
      */
     spacing: number;
 

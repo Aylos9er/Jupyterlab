@@ -1,22 +1,28 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import * as React from 'react';
-
-import Highlight from 'react-highlighter';
-
-import JSONTree from 'react-json-tree';
-
-import { JSONArray, JSONObject, JSONValue } from '@phosphor/coreutils';
-
+import { jupyterHighlightStyle } from '@jupyterlab/codemirror';
+import { ITranslator, nullTranslator } from '@jupyterlab/translation';
 import { InputGroup } from '@jupyterlab/ui-components';
+import { Tag, tags } from '@lezer/highlight';
+import { JSONArray, JSONExt, JSONObject, JSONValue } from '@lumino/coreutils';
+import * as React from 'react';
+import Highlighter from 'react-highlight-words';
+import { JSONTree } from 'react-json-tree';
+import { StyleModule } from 'style-mod';
 
 /**
  * The properties for the JSON tree component.
  */
 export interface IProps {
-  data: JSONValue;
+  data: NonNullable<JSONValue>;
   metadata?: JSONObject;
+
+  /**
+   * The application language translator.
+   */
+  translator?: ITranslator;
+  forwardedRef?: React.Ref<HTMLDivElement>;
 }
 
 /**
@@ -28,6 +34,13 @@ export interface IState {
 }
 
 /**
+ * Get the CodeMirror style for a given tag.
+ */
+function getStyle(tag: Tag): string {
+  return jupyterHighlightStyle.style([tag]) ?? '';
+}
+
+/**
  * A component that renders JSON data as a collapsible tree.
  */
 export class Component extends React.Component<IProps, IState> {
@@ -35,7 +48,11 @@ export class Component extends React.Component<IProps, IState> {
 
   timer: number = 0;
 
-  handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  componentDidMount(): void {
+    StyleModule.mount(document, jupyterHighlightStyle.module as StyleModule);
+  }
+
+  handleChange = (event: React.ChangeEvent<HTMLInputElement>): void => {
     const { value } = event.target;
     this.setState({ value });
     window.clearTimeout(this.timer);
@@ -44,30 +61,33 @@ export class Component extends React.Component<IProps, IState> {
     }, 300);
   };
 
-  render() {
-    const { data, metadata } = this.props;
+  render(): JSX.Element {
+    const translator = this.props.translator || nullTranslator;
+    const trans = translator.load('jupyterlab');
+
+    const { data, metadata, forwardedRef } = this.props;
     const root = metadata && metadata.root ? (metadata.root as string) : 'root';
     const keyPaths = this.state.filter
       ? filterPaths(data, this.state.filter, [root])
       : [root];
     return (
-      <div className="container">
+      <div className="container" ref={forwardedRef}>
         <InputGroup
           className="filter"
           type="text"
-          placeholder="Filter..."
+          placeholder={trans.__('Find…')}
           onChange={this.handleChange}
           value={this.state.value}
-          rightIcon="search"
+          rightIcon="ui-components:search"
         />
         <JSONTree
           data={data}
           collectionLimit={100}
           theme={{
             extend: theme,
-            valueLabel: 'cm-variable',
-            valueText: 'cm-string',
-            nestedNodeItemString: 'cm-comment'
+            valueLabel: getStyle(tags.variableName),
+            valueText: getStyle(tags.string),
+            nestedNodeItemString: getStyle(tags.comment)
           }}
           invertTheme={false}
           keyPath={[root]}
@@ -77,53 +97,43 @@ export class Component extends React.Component<IProps, IState> {
               <span>
                 {itemType} {itemString}
               </span>
-            ) : Object.keys(data).length === 0 ? (
+            ) : Object.keys(data as object).length === 0 ? (
               // Only display object type when it's empty i.e. "{}".
               <span>{itemType}</span>
-            ) : null
+            ) : (
+              null! // Upstream typings don't accept null, but it should be ok
+            )
           }
           labelRenderer={([label, type]) => {
-            // let className = 'cm-variable';
-            // if (type === 'root') {
-            //   className = 'cm-variable-2';
-            // }
-            // if (type === 'array') {
-            //   className = 'cm-variable-2';
-            // }
-            // if (type === 'Object') {
-            //   className = 'cm-variable-3';
-            // }
             return (
-              <span className="cm-keyword">
-                <Highlight
-                  search={this.state.filter}
-                  matchStyle={{ backgroundColor: 'yellow' }}
-                >
-                  {`${label}: `}
-                </Highlight>
+              <span className={getStyle(tags.keyword)}>
+                <Highlighter
+                  searchWords={[this.state.filter]}
+                  textToHighlight={`${label}`}
+                  highlightClassName="jp-mod-selected"
+                ></Highlighter>
               </span>
             );
           }}
           valueRenderer={raw => {
-            let className = 'cm-string';
+            let className = getStyle(tags.string);
             if (typeof raw === 'number') {
-              className = 'cm-number';
+              className = getStyle(tags.number);
             }
             if (raw === 'true' || raw === 'false') {
-              className = 'cm-keyword';
+              className = getStyle(tags.keyword);
             }
             return (
               <span className={className}>
-                <Highlight
-                  search={this.state.filter}
-                  matchStyle={{ backgroundColor: 'yellow' }}
-                >
-                  {`${raw}`}
-                </Highlight>
+                <Highlighter
+                  searchWords={[this.state.filter]}
+                  textToHighlight={`${raw}`}
+                  highlightClassName="jp-mod-selected"
+                ></Highlighter>
               </span>
             );
           }}
-          shouldExpandNode={(keyPath, data, level) =>
+          shouldExpandNodeInitially={(keyPath, data, level) =>
             metadata && metadata.expanded
               ? true
               : keyPaths.join(',').includes(keyPath.join(','))
@@ -153,7 +163,8 @@ const theme = {
   base0C: 'invalid',
   base0D: 'invalid',
   base0E: 'invalid',
-  base0F: 'invalid'
+  base0F: 'invalid',
+  author: 'invalid'
 };
 
 function objectIncludes(data: JSONValue, query: string): boolean {
@@ -161,11 +172,11 @@ function objectIncludes(data: JSONValue, query: string): boolean {
 }
 
 function filterPaths(
-  data: JSONValue,
+  data: NonNullable<JSONValue>,
   query: string,
   parent: JSONArray = ['root']
 ): JSONArray {
-  if (Array.isArray(data)) {
+  if (JSONExt.isArray(data)) {
     return data.reduce((result: JSONArray, item: JSONValue, index: number) => {
       if (item && typeof item === 'object' && objectIncludes(item, query)) {
         return [
@@ -177,9 +188,9 @@ function filterPaths(
       return result;
     }, []) as JSONArray;
   }
-  if (typeof data === 'object') {
+  if (JSONExt.isObject(data)) {
     return Object.keys(data).reduce((result: JSONArray, key: string) => {
-      let item = data[key];
+      const item = data[key];
       if (
         item &&
         typeof item === 'object' &&
@@ -194,4 +205,5 @@ function filterPaths(
       return result;
     }, []);
   }
+  return [];
 }

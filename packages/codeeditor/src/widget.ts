@@ -1,14 +1,10 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import { MimeData } from '@phosphor/coreutils';
-
-import { IDragEvent } from '@phosphor/dragdrop';
-
-import { Message } from '@phosphor/messaging';
-
-import { Widget } from '@phosphor/widgets';
-
+import { MimeData } from '@lumino/coreutils';
+import { Drag } from '@lumino/dragdrop';
+import { Message } from '@lumino/messaging';
+import { Widget } from '@lumino/widgets';
 import { CodeEditor } from './';
 
 /**
@@ -41,15 +37,13 @@ export class CodeEditorWrapper extends Widget {
    */
   constructor(options: CodeEditorWrapper.IOptions) {
     super();
-    const editor = (this.editor = options.factory({
+    const { factory, model, editorOptions } = options;
+    const editor = (this.editor = factory({
       host: this.node,
-      model: options.model,
-      uuid: options.uuid,
-      config: options.config,
-      selectionStyle: options.selectionStyle
+      model,
+      ...editorOptions
     }));
     editor.model.selections.changed.connect(this._onSelectionsChanged, this);
-    this._updateOnShow = options.updateOnShow !== false;
   }
 
   /**
@@ -67,12 +61,12 @@ export class CodeEditorWrapper extends Widget {
   /**
    * Dispose of the resources held by the widget.
    */
-  dispose() {
+  dispose(): void {
     if (this.isDisposed) {
       return;
     }
-    super.dispose();
     this.editor.dispose();
+    super.dispose();
   }
 
   /**
@@ -87,17 +81,17 @@ export class CodeEditorWrapper extends Widget {
    */
   handleEvent(event: Event): void {
     switch (event.type) {
-      case 'p-dragenter':
-        this._evtDragEnter(event as IDragEvent);
+      case 'lm-dragenter':
+        this._evtDragEnter(event as Drag.Event);
         break;
-      case 'p-dragleave':
-        this._evtDragLeave(event as IDragEvent);
+      case 'lm-dragleave':
+        this._evtDragLeave(event as Drag.Event);
         break;
-      case 'p-dragover':
-        this._evtDragOver(event as IDragEvent);
+      case 'lm-dragover':
+        this._evtDragOver(event as Drag.Event);
         break;
-      case 'p-drop':
-        this._evtDrop(event as IDragEvent);
+      case 'lm-drop':
+        this._evtDrop(event as Drag.Event);
         break;
       default:
         break;
@@ -116,52 +110,22 @@ export class CodeEditorWrapper extends Widget {
    */
   protected onAfterAttach(msg: Message): void {
     super.onAfterAttach(msg);
-    let node = this.node;
-    node.addEventListener('p-dragenter', this);
-    node.addEventListener('p-dragleave', this);
-    node.addEventListener('p-dragover', this);
-    node.addEventListener('p-drop', this);
-    if (this.isVisible) {
-      this.update();
-    }
+    const node = this.node;
+    node.addEventListener('lm-dragenter', this);
+    node.addEventListener('lm-dragleave', this);
+    node.addEventListener('lm-dragover', this);
+    node.addEventListener('lm-drop', this);
   }
 
   /**
    * Handle `before-detach` messages for the widget.
    */
   protected onBeforeDetach(msg: Message): void {
-    let node = this.node;
-    node.removeEventListener('p-dragenter', this);
-    node.removeEventListener('p-dragleave', this);
-    node.removeEventListener('p-dragover', this);
-    node.removeEventListener('p-drop', this);
-  }
-
-  /**
-   * A message handler invoked on an `'after-show'` message.
-   */
-  protected onAfterShow(msg: Message): void {
-    if (this._updateOnShow) {
-      this.update();
-    }
-  }
-
-  /**
-   * A message handler invoked on a `'resize'` message.
-   */
-  protected onResize(msg: Widget.ResizeMessage): void {
-    if (msg.width >= 0 && msg.height >= 0) {
-      this.editor.setSize(msg);
-    } else if (this.isVisible) {
-      this.editor.resizeToFit();
-    }
-  }
-
-  /**
-   * A message handler invoked on an `'update-request'` message.
-   */
-  protected onUpdateRequest(msg: Message): void {
-    this.editor.refresh();
+    const node = this.node;
+    node.removeEventListener('lm-dragenter', this);
+    node.removeEventListener('lm-dragleave', this);
+    node.removeEventListener('lm-dragover', this);
+    node.removeEventListener('lm-drop', this);
   }
 
   /**
@@ -180,7 +144,7 @@ export class CodeEditorWrapper extends Widget {
 
       if (
         this.editor
-          .getLine(end.line)
+          .getLine(end.line)!
           .slice(0, end.column)
           .match(leadingWhitespaceRe)
       ) {
@@ -192,9 +156,9 @@ export class CodeEditorWrapper extends Widget {
   }
 
   /**
-   * Handle the `'p-dragenter'` event for the widget.
+   * Handle the `'lm-dragenter'` event for the widget.
    */
-  private _evtDragEnter(event: IDragEvent): void {
+  private _evtDragEnter(event: Drag.Event): void {
     if (this.editor.getOption('readOnly') === true) {
       return;
     }
@@ -208,9 +172,9 @@ export class CodeEditorWrapper extends Widget {
   }
 
   /**
-   * Handle the `'p-dragleave'` event for the widget.
+   * Handle the `'lm-dragleave'` event for the widget.
    */
-  private _evtDragLeave(event: IDragEvent): void {
+  private _evtDragLeave(event: Drag.Event): void {
     this.removeClass(DROP_TARGET_CLASS);
     if (this.editor.getOption('readOnly') === true) {
       return;
@@ -224,9 +188,9 @@ export class CodeEditorWrapper extends Widget {
   }
 
   /**
-   * Handle the `'p-dragover'` event for the widget.
+   * Handle the `'lm-dragover'` event for the widget.
    */
-  private _evtDragOver(event: IDragEvent): void {
+  private _evtDragOver(event: Drag.Event): void {
     this.removeClass(DROP_TARGET_CLASS);
     if (this.editor.getOption('readOnly') === true) {
       return;
@@ -242,14 +206,24 @@ export class CodeEditorWrapper extends Widget {
   }
 
   /**
-   * Handle the `'p-drop'` event for the widget.
+   * Handle the `'lm-drop'` event for the widget.
    */
-  private _evtDrop(event: IDragEvent): void {
+  private _evtDrop(event: Drag.Event): void {
     if (this.editor.getOption('readOnly') === true) {
       return;
     }
     const data = Private.findTextData(event.mimeData);
     if (data === undefined) {
+      return;
+    }
+    const coordinate: CodeEditor.ICoordinate = {
+      top: event.y,
+      bottom: event.y,
+      left: event.x,
+      right: event.x
+    };
+    const position = this.editor.getPositionForCoordinate(coordinate);
+    if (position === null) {
       return;
     }
     this.removeClass(DROP_TARGET_CLASS);
@@ -259,22 +233,9 @@ export class CodeEditorWrapper extends Widget {
       event.dropAction = 'none';
       return;
     }
-    const coordinate = {
-      top: event.y,
-      bottom: event.y,
-      left: event.x,
-      right: event.x,
-      x: event.x,
-      y: event.y,
-      width: 0,
-      height: 0
-    };
-    const position = this.editor.getPositionForCoordinate(coordinate);
     const offset = this.editor.getOffsetAt(position);
-    this.model.value.insert(offset, data);
+    this.model.sharedModel.updateSource(offset, offset, data);
   }
-
-  private _updateOnShow: boolean;
 }
 
 /**
@@ -289,35 +250,20 @@ export namespace CodeEditorWrapper {
      * A code editor factory.
      *
      * #### Notes
-     * The widget needs a factory and a model instead of a `CodeEditor.IEditor`
-     * object because it needs to provide its own node as the host.
+     * The widget needs a factory and a the editor options
+     * because it needs to provide its own node as the host.
      */
     factory: CodeEditor.Factory;
 
     /**
-     * The model used to initialize the code editor.
+     * The content model for the wrapper.
      */
     model: CodeEditor.IModel;
 
     /**
-     * The desired uuid for the editor.
+     * Code editor options
      */
-    uuid?: string;
-
-    /**
-     * The configuration options for the editor.
-     */
-    config?: Partial<CodeEditor.IConfig>;
-
-    /**
-     * The default selection style for the editor.
-     */
-    selectionStyle?: CodeEditor.ISelectionStyle;
-
-    /**
-     * Whether to send an update request to the editor when it is shown.
-     */
-    updateOnShow?: boolean;
+    editorOptions?: Omit<CodeEditor.IOptions, 'host' | 'model'>;
   }
 }
 

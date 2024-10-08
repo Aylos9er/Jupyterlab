@@ -19,7 +19,16 @@
       "path": "../services"
     },
     {
+      "path": "../statedb"
+    },
+    {
       "path": "../statusbar"
+    },
+    {
+      "path": "../translation"
+    },
+    {
+      "path": "../ui-components"
     }
   ]
 }

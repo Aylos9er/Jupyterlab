@@ -1,11 +1,9 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import { IDisposable } from '@phosphor/disposable';
-
-import { Signal } from '@phosphor/signaling';
-
 import { DocumentRegistry } from '@jupyterlab/docregistry';
+import { IDisposable } from '@lumino/disposable';
+import { Signal } from '@lumino/signaling';
 
 /**
  * A class that manages the auto saving of a document.
@@ -19,7 +17,8 @@ export class SaveHandler implements IDisposable {
    */
   constructor(options: SaveHandler.IOptions) {
     this._context = options.context;
-    let interval = options.saveInterval || 120;
+    this._isConnectedCallback = options.isConnectedCallback || (() => true);
+    const interval = options.saveInterval || 120;
     this._minInterval = interval * 1000;
     this._interval = this._minInterval;
     // Restart the timer when the contents model is updated.
@@ -91,7 +90,9 @@ export class SaveHandler implements IDisposable {
       return;
     }
     this._autosaveTimer = window.setTimeout(() => {
-      this._save();
+      if (this._isConnectedCallback()) {
+        this._save();
+      }
     }, this._interval);
   }
 
@@ -99,7 +100,7 @@ export class SaveHandler implements IDisposable {
    * Handle an autosave timeout.
    */
   private _save(): void {
-    let context = this._context;
+    const context = this._context;
 
     // Trigger the next update.
     this._setTimer();
@@ -110,19 +111,19 @@ export class SaveHandler implements IDisposable {
 
     // Bail if the model is not dirty or the file is not writable, or the dialog
     // is already showing.
-    let writable = context.contentsModel && context.contentsModel.writable;
+    const writable = context.contentsModel && context.contentsModel.writable;
     if (!writable || !context.model.dirty || this._inDialog) {
       return;
     }
 
-    let start = new Date().getTime();
+    const start = new Date().getTime();
     context
       .save()
       .then(() => {
         if (this.isDisposed) {
           return;
         }
-        let duration = new Date().getTime() - start;
+        const duration = new Date().getTime() - start;
         // New save interval: higher of 10x save duration or min interval.
         this._interval = Math.max(
           this._multiplier * duration,
@@ -133,7 +134,8 @@ export class SaveHandler implements IDisposable {
       })
       .catch(err => {
         // If the user canceled the save, do nothing.
-        if (err.message === 'Cancel') {
+        const { name } = err;
+        if (name === 'ModalCancelError' || name === 'ModalDuplicateError') {
           return;
         }
         // Otherwise, log the error.
@@ -145,6 +147,7 @@ export class SaveHandler implements IDisposable {
   private _minInterval = -1;
   private _interval = -1;
   private _context: DocumentRegistry.Context;
+  private _isConnectedCallback: () => boolean;
   private _isActive = false;
   private _inDialog = false;
   private _isDisposed = false;
@@ -160,9 +163,15 @@ export namespace SaveHandler {
    */
   export interface IOptions {
     /**
-     * The context asssociated with the file.
+     * The context associated with the file.
      */
     context: DocumentRegistry.Context;
+
+    /**
+     * Autosaving should be paused while this callback function returns `false`.
+     * By default, it always returns `true`.
+     */
+    isConnectedCallback?: () => boolean;
 
     /**
      * The minimum save interval in seconds (default is two minutes).

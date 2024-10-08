@@ -2,18 +2,13 @@
 // Distributed under the terms of the Modified BSD License.
 
 import { IEditorMimeTypeService } from '@jupyterlab/codeeditor';
-
 import { ABCWidgetFactory, DocumentRegistry } from '@jupyterlab/docregistry';
-
 import { IRenderMimeRegistry } from '@jupyterlab/rendermime';
-
-import { ToolbarItems } from './default-toolbar';
-
+import { ITranslator } from '@jupyterlab/translation';
 import { INotebookModel } from './model';
-
 import { NotebookPanel } from './panel';
-
 import { StaticNotebook } from './widget';
+import { NotebookHistory } from './history';
 
 /**
  * A widget factory for notebook panels.
@@ -30,8 +25,7 @@ export class NotebookWidgetFactory extends ABCWidgetFactory<
   constructor(options: NotebookWidgetFactory.IOptions<NotebookPanel>) {
     super(options);
     this.rendermime = options.rendermime;
-    this.contentFactory =
-      options.contentFactory || NotebookPanel.defaultContentFactory;
+    this.contentFactory = options.contentFactory;
     this.mimeTypeService = options.mimeTypeService;
     this._editorConfig =
       options.editorConfig || StaticNotebook.defaultEditorConfig;
@@ -84,7 +78,12 @@ export class NotebookWidgetFactory extends ABCWidgetFactory<
     context: DocumentRegistry.IContext<INotebookModel>,
     source?: NotebookPanel
   ): NotebookPanel {
-    let nbOptions = {
+    const translator = (context as any).translator;
+    const kernelHistory = new NotebookHistory({
+      sessionContext: context.sessionContext,
+      translator: translator
+    });
+    const nbOptions = {
       rendermime: source
         ? source.content.rendermime
         : this.rendermime.clone({ resolver: context.urlResolver }),
@@ -93,20 +92,13 @@ export class NotebookWidgetFactory extends ABCWidgetFactory<
       editorConfig: source ? source.content.editorConfig : this._editorConfig,
       notebookConfig: source
         ? source.content.notebookConfig
-        : this._notebookConfig
+        : this._notebookConfig,
+      translator,
+      kernelHistory
     };
-    let content = this.contentFactory.createNotebook(nbOptions);
+    const content = this.contentFactory.createNotebook(nbOptions);
 
     return new NotebookPanel({ context, content });
-  }
-
-  /**
-   * Default factory for toolbar items to be added after the widget is created.
-   */
-  protected defaultToolbarFactory(
-    widget: NotebookPanel
-  ): DocumentRegistry.IToolbarItem[] {
-    return ToolbarItems.getDefaultItems(widget);
   }
 
   private _editorConfig: StaticNotebook.IEditorConfig;
@@ -146,5 +138,36 @@ export namespace NotebookWidgetFactory {
      * The notebook configuration.
      */
     notebookConfig?: StaticNotebook.INotebookConfig;
+
+    /**
+     * The application language translator.
+     */
+    translator?: ITranslator;
+  }
+
+  /**
+   * The interface for a notebook widget factory.
+   */
+  export interface IFactory
+    extends DocumentRegistry.IWidgetFactory<NotebookPanel, INotebookModel> {
+    /**
+     * Whether to automatically start the preferred kernel.
+     */
+    autoStartDefault: boolean;
+
+    /**
+     * A configuration object for cell editor settings.
+     */
+    editorConfig: StaticNotebook.IEditorConfig;
+
+    /**
+     * A configuration object for notebook settings.
+     */
+    notebookConfig: StaticNotebook.INotebookConfig;
+
+    /**
+     * Whether the kernel should be shutdown when the widget is closed.
+     */
+    shutdownOnClose: boolean;
   }
 }

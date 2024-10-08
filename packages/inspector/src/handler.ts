@@ -2,17 +2,13 @@
 // Distributed under the terms of the Modified BSD License.
 
 import { CodeEditor } from '@jupyterlab/codeeditor';
-
-import { IDataConnector, Text, Debouncer } from '@jupyterlab/coreutils';
-
-import { MimeModel, IRenderMimeRegistry } from '@jupyterlab/rendermime';
-
-import { ReadonlyJSONObject } from '@phosphor/coreutils';
-
-import { IDisposable } from '@phosphor/disposable';
-
-import { ISignal, Signal } from '@phosphor/signaling';
-
+import { Text } from '@jupyterlab/coreutils';
+import { IRenderMimeRegistry, MimeModel } from '@jupyterlab/rendermime';
+import { IDataConnector } from '@jupyterlab/statedb';
+import { JSONExt, ReadonlyJSONObject } from '@lumino/coreutils';
+import { IDisposable } from '@lumino/disposable';
+import { Debouncer } from '@lumino/polling';
+import { ISignal, Signal } from '@lumino/signaling';
 import { IInspector } from './tokens';
 
 /**
@@ -62,7 +58,7 @@ export class InspectionHandler implements IDisposable, IInspector.IInspectable {
     // Remove all of our listeners.
     Signal.disconnectReceiver(this);
 
-    let editor = (this._editor = newValue);
+    const editor = (this._editor = newValue);
     if (editor) {
       // Clear the inspector in preparation for a new editor.
       this._cleared.emit(void 0);
@@ -70,7 +66,7 @@ export class InspectionHandler implements IDisposable, IInspector.IInspectable {
       // the active cell
       this.onEditorChange();
       editor.model.selections.changed.connect(this._onChange, this);
-      editor.model.value.changed.connect(this._onChange, this);
+      editor.model.sharedModel.changed.connect(this._onChange, this);
     }
   }
 
@@ -106,6 +102,7 @@ export class InspectionHandler implements IDisposable, IInspector.IInspectable {
       return;
     }
     this._isDisposed = true;
+    this._debouncer.dispose();
     this._disposed.emit(void 0);
     Signal.clearData(this);
   }
@@ -116,7 +113,7 @@ export class InspectionHandler implements IDisposable, IInspector.IInspectable {
    * #### Notes
    * Update the hints inspector based on a text change.
    */
-  protected onEditorChange(): void {
+  onEditorChange(customText?: string): void {
     // If the handler is in standby mode, bail.
     if (this._standby) {
       return;
@@ -127,8 +124,7 @@ export class InspectionHandler implements IDisposable, IInspector.IInspectable {
     if (!editor) {
       return;
     }
-
-    const text = editor.model.value.text;
+    const text = customText ? customText : editor.model.sharedModel.getSource();
     const position = editor.getCursorPosition();
     const offset = Text.jsIndexToCharIndex(editor.getOffsetAt(position), text);
     const update: IInspector.IInspectorUpdate = { content: null };
@@ -139,14 +135,23 @@ export class InspectionHandler implements IDisposable, IInspector.IInspectable {
       .fetch({ offset, text })
       .then(reply => {
         // If handler has been disposed or a newer request is pending, bail.
-        if (this.isDisposed || pending !== this._pending) {
+        if (!reply || this.isDisposed || pending !== this._pending) {
+          this._lastInspectedReply = null;
           this._inspected.emit(update);
           return;
         }
 
         const { data } = reply;
-        const mimeType = this._rendermime.preferredMimeType(data);
 
+        // Do not update if there would be no change.
+        if (
+          this._lastInspectedReply &&
+          JSONExt.deepEqual(this._lastInspectedReply, data)
+        ) {
+          return;
+        }
+
+        const mimeType = this._rendermime.preferredMimeType(data);
         if (mimeType) {
           const widget = this._rendermime.createRenderer(mimeType);
           const model = new MimeModel({ data });
@@ -155,10 +160,12 @@ export class InspectionHandler implements IDisposable, IInspector.IInspectable {
           update.content = widget;
         }
 
+        this._lastInspectedReply = reply.data;
         this._inspected.emit(update);
       })
       .catch(reason => {
         // Since almost all failures are benign, fail silently.
+        this._lastInspectedReply = null;
         this._inspected.emit(update);
       });
   }
@@ -184,6 +191,7 @@ export class InspectionHandler implements IDisposable, IInspector.IInspectable {
   private _rendermime: IRenderMimeRegistry;
   private _standby = true;
   private _debouncer: Debouncer;
+  private _lastInspectedReply: InspectionHandler.IReply['data'] | null = null;
 }
 
 /**

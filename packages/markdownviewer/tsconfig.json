@@ -17,6 +17,12 @@
     },
     {
       "path": "../rendermime"
+    },
+    {
+      "path": "../toc"
+    },
+    {
+      "path": "../translation"
     }
   ]
 }

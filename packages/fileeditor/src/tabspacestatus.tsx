@@ -1,21 +1,11 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
+import { Popup, showPopup, TextItem } from '@jupyterlab/statusbar';
+import { ITranslator, nullTranslator } from '@jupyterlab/translation';
+import { VDomModel, VDomRenderer } from '@jupyterlab/ui-components';
+import { Menu } from '@lumino/widgets';
 import React from 'react';
-
-import { VDomRenderer, VDomModel } from '@jupyterlab/apputils';
-
-import { CodeEditor } from '@jupyterlab/codeeditor';
-
-import {
-  interactiveItem,
-  clickedItem,
-  Popup,
-  showPopup,
-  TextItem
-} from '@jupyterlab/statusbar';
-
-import { Menu } from '@phosphor/widgets';
 
 /**
  * A namespace for TabSpaceComponent statics.
@@ -26,14 +16,16 @@ namespace TabSpaceComponent {
    */
   export interface IProps {
     /**
-     * The number of spaces to insert on tab.
+     * The number of spaces for indentation.
+     *
+     * `null` means use tab character for indentation.
      */
-    tabSpace: number;
+    tabSpace: number | null;
 
     /**
-     * Whether to use spaces or tabs.
+     * The application language translator.
      */
-    isSpaces: boolean;
+    translator?: ITranslator;
 
     /**
      * A click handler for the TabSpace component. By default
@@ -49,12 +41,21 @@ namespace TabSpaceComponent {
 function TabSpaceComponent(
   props: TabSpaceComponent.IProps
 ): React.ReactElement<TabSpaceComponent.IProps> {
-  const description = props.isSpaces ? 'Spaces' : 'Tab Size';
+  const translator = props.translator || nullTranslator;
+  const trans = translator.load('jupyterlab');
+  const description =
+    typeof props.tabSpace === 'number'
+      ? trans.__('Spaces')
+      : trans.__('Tab Indent');
   return (
     <TextItem
       onClick={props.handleClick}
-      source={`${description}: ${props.tabSpace}`}
-      title={`Change Tab indentation…`}
+      source={
+        typeof props.tabSpace === 'number'
+          ? `${description}: ${props.tabSpace}`
+          : description
+      }
+      title={trans.__('Change the indentation…')}
     />
   );
 }
@@ -67,24 +68,28 @@ export class TabSpaceStatus extends VDomRenderer<TabSpaceStatus.Model> {
    * Create a new tab/space status item.
    */
   constructor(options: TabSpaceStatus.IOptions) {
-    super();
+    super(new TabSpaceStatus.Model());
     this._menu = options.menu;
-    this.model = new TabSpaceStatus.Model();
-    this.addClass(interactiveItem);
+    this.translator = options.translator || nullTranslator;
+    this.addClass('jp-mod-highlighted');
   }
 
   /**
    * Render the TabSpace status item.
    */
-  render(): React.ReactElement<TabSpaceComponent.IProps> | null {
-    if (!this.model || !this.model.config) {
+  render(): JSX.Element | null {
+    if (!this.model?.indentUnit) {
       return null;
     } else {
+      const tabSpace =
+        this.model.indentUnit === 'Tab'
+          ? null
+          : parseInt(this.model.indentUnit, 10);
       return (
         <TabSpaceComponent
-          isSpaces={this.model.config.insertSpaces}
-          tabSpace={this.model.config.tabSize}
+          tabSpace={tabSpace}
           handleClick={() => this._handleClick()}
+          translator={this.translator}
         />
       );
     }
@@ -106,12 +111,15 @@ export class TabSpaceStatus extends VDomRenderer<TabSpaceStatus.Model> {
       anchor: this,
       align: 'right'
     });
+    // Update the menu items
+    menu.update();
   }
 
   private _menuClosed(): void {
-    this.removeClass(clickedItem);
+    this.removeClass('jp-mod-clicked');
   }
 
+  protected translator: ITranslator;
   private _menu: Menu;
   private _popup: Popup | null = null;
 }
@@ -125,31 +133,19 @@ export namespace TabSpaceStatus {
    */
   export class Model extends VDomModel {
     /**
-     * The editor config from the settings system.
+     * Code editor indentation unit
      */
-    get config(): CodeEditor.IConfig | null {
-      return this._config;
+    get indentUnit(): string | null {
+      return this._indentUnit;
     }
-    set config(val: CodeEditor.IConfig | null) {
-      const oldConfig = this._config;
-      this._config = val;
-      this._triggerChange(oldConfig, this._config);
-    }
-
-    private _triggerChange(
-      oldValue: CodeEditor.IConfig | null,
-      newValue: CodeEditor.IConfig | null
-    ): void {
-      const oldSpaces = oldValue && oldValue.insertSpaces;
-      const oldSize = oldValue && oldValue.tabSize;
-      const newSpaces = newValue && newValue.insertSpaces;
-      const newSize = newValue && newValue.tabSize;
-      if (oldSpaces !== newSpaces || oldSize !== newSize) {
-        this.stateChanged.emit(void 0);
+    set indentUnit(v: string | null) {
+      if (v !== this._indentUnit) {
+        this._indentUnit = v;
+        this.stateChanged.emit();
       }
     }
 
-    private _config: CodeEditor.IConfig | null = null;
+    private _indentUnit: string | null;
   }
 
   /**
@@ -161,5 +157,10 @@ export namespace TabSpaceStatus {
      * the user to make a different selection about tabs/spaces.
      */
     menu: Menu;
+
+    /**
+     * Language translator.
+     */
+    translator?: ITranslator;
   }
 }

@@ -19,19 +19,25 @@
       "path": "../docmanager"
     },
     {
+      "path": "../docregistry"
+    },
+    {
       "path": "../filebrowser"
-    },
-    {
-      "path": "../launcher"
-    },
-    {
-      "path": "../mainmenu"
     },
     {
       "path": "../services"
     },
     {
+      "path": "../settingregistry"
+    },
+    {
+      "path": "../statedb"
+    },
+    {
       "path": "../statusbar"
+    },
+    {
+      "path": "../translation"
     },
     {
       "path": "../ui-components"

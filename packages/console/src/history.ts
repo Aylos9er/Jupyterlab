@@ -1,24 +1,20 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import { KernelMessage } from '@jupyterlab/services';
-
-import { IDisposable } from '@phosphor/disposable';
-
-import { Signal } from '@phosphor/signaling';
-
-import { IClientSession } from '@jupyterlab/apputils';
-
+import { ISessionContext } from '@jupyterlab/apputils';
 import { CodeEditor } from '@jupyterlab/codeeditor';
+import { KernelMessage } from '@jupyterlab/services';
+import { IDisposable } from '@lumino/disposable';
+import { Signal } from '@lumino/signaling';
 
 /**
  * The definition of a console history manager object.
  */
 export interface IConsoleHistory extends IDisposable {
   /**
-   * The client session used by the foreign handler.
+   * The session context used by the foreign handler.
    */
-  readonly session: IClientSession;
+  readonly sessionContext: ISessionContext | null;
 
   /**
    * The current editor used by the history widget.
@@ -78,15 +74,18 @@ export class ConsoleHistory implements IConsoleHistory {
    * Construct a new console history object.
    */
   constructor(options: ConsoleHistory.IOptions) {
-    this.session = options.session;
-    void this._handleKernel();
-    this.session.kernelChanged.connect(this._handleKernel, this);
+    const { sessionContext } = options;
+    if (sessionContext) {
+      this.sessionContext = sessionContext;
+      void this._handleKernel();
+      this.sessionContext.kernelChanged.connect(this._handleKernel, this);
+    }
   }
 
   /**
    * The client session used by the foreign handler.
    */
-  readonly session: IClientSession;
+  readonly sessionContext: ISessionContext | null;
 
   /**
    * The current editor used by the history manager.
@@ -99,17 +98,17 @@ export class ConsoleHistory implements IConsoleHistory {
       return;
     }
 
-    let prev = this._editor;
+    const prev = this._editor;
     if (prev) {
       prev.edgeRequested.disconnect(this.onEdgeRequest, this);
-      prev.model.value.changed.disconnect(this.onTextChange, this);
+      prev.model.sharedModel.changed.disconnect(this.onTextChange, this);
     }
 
     this._editor = value;
 
     if (value) {
       value.edgeRequested.connect(this.onEdgeRequest, this);
-      value.model.value.changed.connect(this.onTextChange, this);
+      value.model.sharedModel.changed.connect(this.onTextChange, this);
     }
   }
 
@@ -156,7 +155,7 @@ export class ConsoleHistory implements IConsoleHistory {
 
     --this._cursor;
     this._cursor = Math.max(0, this._cursor);
-    let content = this._filtered[this._cursor];
+    const content = this._filtered[this._cursor];
     return Promise.resolve(content);
   }
 
@@ -180,7 +179,7 @@ export class ConsoleHistory implements IConsoleHistory {
 
     ++this._cursor;
     this._cursor = Math.min(this._filtered.length - 1, this._cursor);
-    let content = this._filtered[this._cursor];
+    const content = this._filtered[this._cursor];
     return Promise.resolve(content);
   }
 
@@ -254,19 +253,19 @@ export class ConsoleHistory implements IConsoleHistory {
     editor: CodeEditor.IEditor,
     location: CodeEditor.EdgeLocation
   ): void {
-    let model = editor.model;
-    let source = model.value.text;
+    const sharedModel = editor.model.sharedModel;
+    const source = sharedModel.getSource();
 
     if (location === 'top' || location === 'topLine') {
       void this.back(source).then(value => {
         if (this.isDisposed || !value) {
           return;
         }
-        if (model.value.text === value) {
+        if (sharedModel.getSource() === value) {
           return;
         }
         this._setByHistory = true;
-        model.value.text = value;
+        sharedModel.setSource(value);
         let columnPos = 0;
         columnPos = value.indexOf('\n');
         if (columnPos < 0) {
@@ -279,13 +278,13 @@ export class ConsoleHistory implements IConsoleHistory {
         if (this.isDisposed) {
           return;
         }
-        let text = value || this.placeholder;
-        if (model.value.text === text) {
+        const text = value || this.placeholder;
+        if (sharedModel.getSource() === text) {
           return;
         }
         this._setByHistory = true;
-        model.value.text = text;
-        let pos = editor.getPositionAt(text.length);
+        sharedModel.setSource(text);
+        const pos = editor.getPositionAt(text.length);
         if (pos) {
           editor.setCursorPosition(pos);
         }
@@ -297,7 +296,7 @@ export class ConsoleHistory implements IConsoleHistory {
    * Handle the current kernel changing.
    */
   private async _handleKernel(): Promise<void> {
-    let kernel = this.session.kernel;
+    const kernel = this.sessionContext?.session?.kernel;
     if (!kernel) {
       this._history.length = 0;
       return;
@@ -354,7 +353,7 @@ export namespace ConsoleHistory {
     /**
      * The client session used by the foreign handler.
      */
-    session: IClientSession;
+    sessionContext?: ISessionContext;
   }
 }
 

@@ -4,11 +4,8 @@
     "outDir": "lib",
     "rootDir": "src"
   },
-  "include": ["src/*"],
+  "include": ["src/**/*"],
   "references": [
-    {
-      "path": "../apputils"
-    },
     {
       "path": "../codeeditor"
     },
@@ -16,10 +13,13 @@
       "path": "../coreutils"
     },
     {
-      "path": "../observables"
+      "path": "../documentsearch"
     },
     {
-      "path": "../statusbar"
+      "path": "../nbformat"
+    },
+    {
+      "path": "../translation"
     }
   ]
 }

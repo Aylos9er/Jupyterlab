@@ -1,362 +1,497 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
+/**
+ * @packageDocumentation
+ * @module completer-extension
+ */
 
 import {
   JupyterFrontEnd,
   JupyterFrontEndPlugin
 } from '@jupyterlab/application';
-
+import { COMPLETER_ACTIVE_CLASS } from '@jupyterlab/codeeditor';
+import { CommandToolbarButton } from '@jupyterlab/ui-components';
 import {
-  CompleterModel,
-  Completer,
-  CompletionConnector,
-  CompletionHandler,
-  ContextConnector,
-  ICompletionManager
+  CompletionProviderManager,
+  ContextCompleterProvider,
+  HistoryInlineCompletionProvider,
+  ICompletionProviderManager,
+  IInlineCompleterFactory,
+  IInlineCompleterSettings,
+  IInlineCompletionProviderInfo,
+  InlineCompleter,
+  KernelCompleterProvider
 } from '@jupyterlab/completer';
+import { ISettingRegistry } from '@jupyterlab/settingregistry';
+import {
+  caretLeftIcon,
+  caretRightIcon,
+  checkIcon,
+  IFormRenderer,
+  IFormRendererRegistry
+} from '@jupyterlab/ui-components';
+import { ITranslator, nullTranslator } from '@jupyterlab/translation';
+import type { FieldProps } from '@rjsf/utils';
+import { CommandRegistry } from '@lumino/commands';
 
-import { IConsoleTracker } from '@jupyterlab/console';
+import { renderAvailableProviders } from './renderer';
 
-import { IEditorTracker } from '@jupyterlab/fileeditor';
+const COMPLETION_MANAGER_PLUGIN = '@jupyterlab/completer-extension:manager';
+const INLINE_COMPLETER_PLUGIN =
+  '@jupyterlab/completer-extension:inline-completer';
 
-import { INotebookTracker } from '@jupyterlab/notebook';
-
-import { Session } from '@jupyterlab/services';
-
-import { find } from '@phosphor/algorithm';
-
-import { Widget } from '@phosphor/widgets';
-
-/**
- * The command IDs used by the completer plugin.
- */
 namespace CommandIDs {
-  export const invoke = 'completer:invoke';
-
-  export const invokeConsole = 'completer:invoke-console';
-
-  export const invokeNotebook = 'completer:invoke-notebook';
-
-  export const invokeFile = 'completer:invoke-file';
-
-  export const select = 'completer:select';
-
-  export const selectConsole = 'completer:select-console';
-
-  export const selectNotebook = 'completer:select-notebook';
-
-  export const selectFile = 'completer:select-file';
+  export const nextInline = 'inline-completer:next';
+  export const previousInline = 'inline-completer:previous';
+  export const acceptInline = 'inline-completer:accept';
+  export const invokeInline = 'inline-completer:invoke';
 }
 
-/**
- * A plugin providing code completion for editors.
- */
-const manager: JupyterFrontEndPlugin<ICompletionManager> = {
-  id: '@jupyterlab/completer-extension:manager',
+const defaultProviders: JupyterFrontEndPlugin<void> = {
+  id: '@jupyterlab/completer-extension:base-service',
+  description: 'Adds context and kernel completion providers.',
+  requires: [ICompletionProviderManager],
   autoStart: true,
-  provides: ICompletionManager,
-  activate: (app: JupyterFrontEnd): ICompletionManager => {
-    const handlers: { [id: string]: CompletionHandler } = {};
+  activate: (
+    app: JupyterFrontEnd,
+    completionManager: ICompletionProviderManager
+  ): void => {
+    completionManager.registerProvider(new ContextCompleterProvider());
+    completionManager.registerProvider(new KernelCompleterProvider());
+  }
+};
 
-    app.commands.addCommand(CommandIDs.invoke, {
-      execute: args => {
-        let id = args && (args['id'] as string);
-        if (!id) {
-          return;
-        }
+const inlineHistoryProvider: JupyterFrontEndPlugin<void> = {
+  id: '@jupyterlab/completer-extension:inline-history',
+  description:
+    'Adds inline completion provider suggesting code from execution history.',
+  requires: [ICompletionProviderManager],
+  optional: [ITranslator],
+  autoStart: true,
+  activate: (
+    app: JupyterFrontEnd,
+    completionManager: ICompletionProviderManager,
+    translator: ITranslator | null
+  ): void => {
+    completionManager.registerInlineProvider(
+      new HistoryInlineCompletionProvider({
+        translator: translator ?? nullTranslator
+      })
+    );
+  }
+};
 
-        const handler = handlers[id];
-        if (handler) {
-          handler.invoke();
-        }
-      }
-    });
-
-    app.commands.addCommand(CommandIDs.select, {
-      execute: args => {
-        let id = args && (args['id'] as string);
-        if (!id) {
-          return;
-        }
-
-        const handler = handlers[id];
-        if (handler) {
-          handler.completer.selectActive();
-        }
-      }
-    });
-
+const inlineCompleterFactory: JupyterFrontEndPlugin<IInlineCompleterFactory> = {
+  id: '@jupyterlab/completer-extension:inline-completer-factory',
+  description: 'Provides a factory for inline completer.',
+  provides: IInlineCompleterFactory,
+  optional: [ITranslator],
+  autoStart: true,
+  activate: (
+    app: JupyterFrontEnd,
+    translator: ITranslator | null
+  ): IInlineCompleterFactory => {
+    const trans = (translator || nullTranslator).load('jupyterlab');
     return {
-      register: (
-        completable: ICompletionManager.ICompletable
-      ): ICompletionManager.ICompletableAttributes => {
-        const { connector, editor, parent } = completable;
-        const model = new CompleterModel();
-        const completer = new Completer({ editor, model });
-        const handler = new CompletionHandler({ completer, connector });
-        const id = parent.id;
-
-        // Hide the widget when it first loads.
-        completer.hide();
-
-        // Associate the handler with the parent widget.
-        handlers[id] = handler;
-
-        // Set the handler's editor.
-        handler.editor = editor;
-
-        // Attach the completer widget.
-        Widget.attach(completer, document.body);
-
-        // Listen for parent disposal.
-        parent.disposed.connect(() => {
-          delete handlers[id];
-          model.dispose();
-          completer.dispose();
-          handler.dispose();
+      factory: options => {
+        const inlineCompleter = new InlineCompleter({
+          ...options,
+          trans: trans
         });
+        const describeShortcut = (commandID: string): string => {
+          const binding = app.commands.keyBindings.find(
+            binding => binding.command === commandID
+          );
+          const keys = binding
+            ? CommandRegistry.formatKeystroke(binding.keys)
+            : '';
+          return keys ? `${keys}` : '';
+        };
 
-        return handler;
+        const labelCache = {
+          [CommandIDs.previousInline]: describeShortcut(
+            CommandIDs.previousInline
+          ),
+          [CommandIDs.nextInline]: describeShortcut(CommandIDs.nextInline),
+          [CommandIDs.acceptInline]: describeShortcut(CommandIDs.acceptInline)
+        };
+
+        app.commands.keyBindingChanged.connect(
+          (
+            _emitter: CommandRegistry,
+            change: CommandRegistry.IKeyBindingChangedArgs
+          ) => {
+            const command = change.binding.command;
+            if (labelCache.hasOwnProperty(command)) {
+              const cached = labelCache[command as keyof typeof labelCache];
+              const newLabel = describeShortcut(command);
+              if (newLabel !== cached) {
+                // Update cache
+                labelCache[command as keyof typeof labelCache] = newLabel;
+                // Re-render any UI elements using this command
+                app.commands.notifyCommandChanged(command);
+              }
+            }
+          }
+        );
+
+        inlineCompleter.toolbar.addItem(
+          'previous-inline-completion',
+          new CommandToolbarButton({
+            commands: app.commands,
+            icon: caretLeftIcon,
+            id: CommandIDs.previousInline,
+            label: () => labelCache[CommandIDs.previousInline],
+            caption: trans.__('Previous')
+          })
+        );
+        inlineCompleter.toolbar.addItem(
+          'next-inline-completion',
+          new CommandToolbarButton({
+            commands: app.commands,
+            icon: caretRightIcon,
+            id: CommandIDs.nextInline,
+            label: () => labelCache[CommandIDs.nextInline],
+            caption: trans.__('Next')
+          })
+        );
+        inlineCompleter.toolbar.addItem(
+          'accept-inline-completion',
+          new CommandToolbarButton({
+            commands: app.commands,
+            icon: checkIcon,
+            id: CommandIDs.acceptInline,
+            label: () => labelCache[CommandIDs.acceptInline],
+            caption: trans.__('Accept')
+          })
+        );
+        inlineCompleter.model!.suggestionsChanged.connect(() => {
+          // Enabled state of these commands depends on whether
+          // there are any suggestions (or whether there is more
+          // than one suggestion) so the UI needs to be modified
+          // when the suggestions change to reflect the enabled
+          // state in the buttons state.
+          for (const command of [
+            CommandIDs.previousInline,
+            CommandIDs.nextInline,
+            CommandIDs.acceptInline
+          ]) {
+            app.commands.notifyCommandChanged(command);
+          }
+        });
+        return inlineCompleter;
       }
     };
   }
 };
 
-/**
- * An extension that registers consoles for code completion.
- */
-const consoles: JupyterFrontEndPlugin<void> = {
-  id: '@jupyterlab/completer-extension:consoles',
-  requires: [ICompletionManager, IConsoleTracker],
+const inlineCompleter: JupyterFrontEndPlugin<void> = {
+  id: INLINE_COMPLETER_PLUGIN,
+  description:
+    'Registers the inline completer factory; adds inline completer commands, shortcuts and settings.',
+  requires: [
+    ICompletionProviderManager,
+    IInlineCompleterFactory,
+    ISettingRegistry
+  ],
+  optional: [ITranslator],
   autoStart: true,
   activate: (
     app: JupyterFrontEnd,
-    manager: ICompletionManager,
-    consoles: IConsoleTracker
+    completionManager: ICompletionProviderManager,
+    factory: IInlineCompleterFactory,
+    settings: ISettingRegistry,
+    translator: ITranslator | null
   ): void => {
-    // Create a handler for each console that is created.
-    consoles.widgetAdded.connect((sender, panel) => {
-      const anchor = panel.console;
-      const cell = anchor.promptCell;
-      const editor = cell && cell.editor;
-      const session = anchor.session;
-      const parent = panel;
-      const connector = new CompletionConnector({ session, editor });
-      const handler = manager.register({ connector, editor, parent });
-
-      // Listen for prompt creation.
-      anchor.promptCellCreated.connect((sender, cell) => {
-        const editor = cell && cell.editor;
-        handler.editor = editor;
-        handler.connector = new CompletionConnector({ session, editor });
-      });
-    });
-
-    // Add console completer invoke command.
-    app.commands.addCommand(CommandIDs.invokeConsole, {
+    completionManager.setInlineCompleterFactory(factory);
+    const trans = (translator || nullTranslator).load('jupyterlab');
+    const isEnabled = () =>
+      !!app.shell.currentWidget && !!completionManager.inline;
+    let inlineCompleterSettings: IInlineCompleterSettings | undefined;
+    app.commands.addCommand(CommandIDs.nextInline, {
       execute: () => {
-        const id = consoles.currentWidget && consoles.currentWidget.id;
-
-        if (id) {
-          return app.commands.execute(CommandIDs.invoke, { id });
-        }
+        completionManager.inline?.cycle(app.shell.currentWidget!.id!, 'next');
+      },
+      label: trans.__('Next Inline Completion'),
+      isEnabled
+    });
+    app.commands.addCommand(CommandIDs.previousInline, {
+      execute: () => {
+        completionManager.inline?.cycle(
+          app.shell.currentWidget!.id!,
+          'previous'
+        );
+      },
+      label: trans.__('Previous Inline Completion'),
+      isEnabled
+    });
+    app.commands.addCommand(CommandIDs.acceptInline, {
+      execute: () => {
+        completionManager.inline?.accept(app.shell.currentWidget!.id!);
+      },
+      label: trans.__('Accept Inline Completion'),
+      isEnabled: () => {
+        return (
+          isEnabled() &&
+          completionManager.inline!.isActive(app.shell.currentWidget!.id!)
+        );
       }
     });
-
-    // Add console completer select command.
-    app.commands.addCommand(CommandIDs.selectConsole, {
+    app.commands.addCommand(CommandIDs.invokeInline, {
       execute: () => {
-        const id = consoles.currentWidget && consoles.currentWidget.id;
-
-        if (id) {
-          return app.commands.execute(CommandIDs.select, { id });
-        }
-      }
+        completionManager.inline?.invoke(app.shell.currentWidget!.id!);
+      },
+      label: trans.__('Invoke Inline Completer'),
+      isEnabled
     });
 
-    // Set enter key for console completer select command.
-    app.commands.addKeyBinding({
-      command: CommandIDs.selectConsole,
-      keys: ['Enter'],
-      selector: `.jp-ConsolePanel .jp-mod-completer-active`
-    });
-  }
-};
+    const updateSettings = (settings: ISettingRegistry.ISettings) => {
+      inlineCompleterSettings =
+        settings.composite as unknown as IInlineCompleterSettings;
+      completionManager.inline?.configure(inlineCompleterSettings);
+    };
 
-/**
- * An extension that registers notebooks for code completion.
- */
-const notebooks: JupyterFrontEndPlugin<void> = {
-  id: '@jupyterlab/completer-extension:notebooks',
-  requires: [ICompletionManager, INotebookTracker],
-  autoStart: true,
-  activate: (
-    app: JupyterFrontEnd,
-    manager: ICompletionManager,
-    notebooks: INotebookTracker
-  ): void => {
-    // Create a handler for each notebook that is created.
-    notebooks.widgetAdded.connect((sender, panel) => {
-      const cell = panel.content.activeCell;
-      const editor = cell && cell.editor;
-      const session = panel.session;
-      const parent = panel;
-      const connector = new CompletionConnector({ session, editor });
-      const handler = manager.register({ connector, editor, parent });
+    app.restored
+      .then(() => {
+        const availableProviders = completionManager.inlineProviders ?? [];
+        const composeDefaults = (provider: IInlineCompletionProviderInfo) => {
+          return {
+            // By default all providers are opt-out, but
+            // any provider can configure itself to be opt-in.
+            enabled: true,
+            timeout: 5000,
+            debouncerDelay: 0,
+            ...((provider.schema?.default as object) ?? {})
+          };
+        };
+        settings.transform(INLINE_COMPLETER_PLUGIN, {
+          compose: plugin => {
+            const providers: IInlineCompleterSettings['providers'] =
+              (plugin.data.composite[
+                'providers'
+              ] as IInlineCompleterSettings['providers']) ?? {};
+            for (const provider of availableProviders) {
+              const defaults = composeDefaults(provider);
+              providers[provider.identifier] = {
+                ...defaults,
+                ...(providers[provider.identifier] ?? {})
+              };
+            }
+            // Add fallback defaults in composite settings values
+            plugin.data['composite']['providers'] = providers;
+            return plugin;
+          },
+          fetch: plugin => {
+            const schema = plugin.schema.properties!;
+            const providersSchema: {
+              [property: string]: ISettingRegistry.IProperty;
+            } = {};
+            for (const provider of availableProviders) {
+              providersSchema[provider.identifier] = {
+                title: trans.__('%1 provider', provider.name),
+                properties: {
+                  ...(provider.schema?.properties ?? {}),
+                  timeout: {
+                    title: trans.__('Timeout'),
+                    description: trans.__(
+                      'Timeout for %1 provider (in milliseconds).',
+                      provider.name
+                    ),
+                    type: 'number',
+                    minimum: 0
+                  },
+                  debouncerDelay: {
+                    title: trans.__('Debouncer delay'),
+                    minimum: 0,
+                    description: trans.__(
+                      'Time since the last key press to wait before requesting completions from %1 provider (in milliseconds).',
+                      provider.name
+                    ),
+                    type: 'number'
+                  },
+                  enabled: {
+                    title: trans.__('Enabled'),
+                    description: trans.__(
+                      'Whether to fetch completions %1 provider.',
+                      provider.name
+                    ),
+                    type: 'boolean'
+                  }
+                },
+                default: composeDefaults(provider),
+                type: 'object'
+              };
+            }
+            // Populate schema for providers settings
+            schema['providers']['properties'] = providersSchema;
+            return plugin;
+          }
+        });
 
-      // Listen for active cell changes.
-      panel.content.activeCellChanged.connect((sender, cell) => {
-        const editor = cell && cell.editor;
-        handler.editor = editor;
-        handler.connector = new CompletionConnector({ session, editor });
-      });
-    });
+        const settingsPromise = settings.load(INLINE_COMPLETER_PLUGIN);
+        settingsPromise
+          .then(settingValues => {
+            updateSettings(settingValues);
+            settingValues.changed.connect(newSettings => {
+              updateSettings(newSettings);
+            });
+          })
+          .catch(console.error);
+      })
+      .catch(console.error);
 
-    // Add notebook completer command.
-    app.commands.addCommand(CommandIDs.invokeNotebook, {
-      execute: () => {
-        const panel = notebooks.currentWidget;
-        if (panel && panel.content.activeCell.model.type === 'code') {
-          return app.commands.execute(CommandIDs.invoke, { id: panel.id });
-        }
-      }
-    });
+    const findKeybinding = (
+      commandID: string
+    ): CommandRegistry.IKeyBinding | undefined => {
+      return app.commands.keyBindings.find(
+        binding => binding.command === commandID
+      );
+    };
 
-    // Add notebook completer select command.
-    app.commands.addCommand(CommandIDs.selectNotebook, {
-      execute: () => {
-        const id = notebooks.currentWidget && notebooks.currentWidget.id;
+    const keyBindings = {
+      [CommandIDs.acceptInline]: findKeybinding(CommandIDs.acceptInline),
+      [CommandIDs.invokeInline]: findKeybinding(CommandIDs.invokeInline)
+    };
 
-        if (id) {
-          return app.commands.execute(CommandIDs.select, { id });
-        }
-      }
-    });
-
-    // Set enter key for notebook completer select command.
-    app.commands.addKeyBinding({
-      command: CommandIDs.selectNotebook,
-      keys: ['Enter'],
-      selector: `.jp-Notebook .jp-mod-completer-active`
-    });
-  }
-};
-
-/**
- * An extension that registers file editors for completion.
- */
-const files: JupyterFrontEndPlugin<void> = {
-  id: '@jupyterlab/completer-extension:files',
-  requires: [ICompletionManager, IEditorTracker],
-  autoStart: true,
-  activate: (
-    app: JupyterFrontEnd,
-    manager: ICompletionManager,
-    editorTracker: IEditorTracker
-  ): void => {
-    // Keep a list of active ISessions so that we can
-    // clean them up when they are no longer needed.
-    const activeSessions: {
-      [id: string]: Session.ISession;
-    } = {};
-
-    // When a new file editor is created, make the completer for it.
-    editorTracker.widgetAdded.connect((sender, widget) => {
-      const sessions = app.serviceManager.sessions;
-      const editor = widget.content.editor;
-      const contextConnector = new ContextConnector({ editor });
-
-      // When the list of running sessions changes,
-      // check to see if there are any kernels with a
-      // matching path for this file editor.
-      const onRunningChanged = (
-        sender: Session.IManager,
-        models: Session.IModel[]
+    app.commands.keyBindingChanged.connect(
+      (
+        _emitter: CommandRegistry,
+        change: CommandRegistry.IKeyBindingChangedArgs
       ) => {
-        const oldSession = activeSessions[widget.id];
-        // Search for a matching path.
-        const model = find(models, m => m.path === widget.context.path);
-        if (model) {
-          // If there is a matching path, but it is the same
-          // session as we previously had, do nothing.
-          if (oldSession && oldSession.id === model.id) {
-            return;
+        const command = change.binding.command;
+        if (keyBindings.hasOwnProperty(command)) {
+          keyBindings[command as keyof typeof keyBindings] =
+            findKeybinding(command);
+        }
+      }
+    );
+
+    const evtKeydown = (event: KeyboardEvent) => {
+      // Handle bindings to `Tab` key specially
+      if (!(event.target instanceof Element)) {
+        return;
+      }
+      const target = event.target as Element;
+      switch (event.keyCode) {
+        case 9: {
+          // Tab key
+          const potentialTabBindings = [
+            // Note: `accept` should come ahead of `invoke` due to specificity
+            keyBindings[CommandIDs.acceptInline],
+            keyBindings[CommandIDs.invokeInline]
+          ];
+          for (const binding of potentialTabBindings) {
+            if (
+              binding &&
+              binding.keys.length === 1 &&
+              binding.keys[0] === 'Tab' &&
+              target.closest(binding.selector) &&
+              app.commands.isEnabled(binding.command)
+            ) {
+              const tabCompleterActive = target.closest(
+                '.' + COMPLETER_ACTIVE_CLASS
+              );
+              if (
+                inlineCompleterSettings?.suppressIfTabCompleterActive &&
+                tabCompleterActive
+              ) {
+                return;
+              }
+              app.commands.execute(binding.command).catch(console.error);
+              event.preventDefault();
+              event.stopPropagation();
+              event.stopImmediatePropagation();
+              return;
+            }
           }
-          // Otherwise, dispose of the old session and reset to
-          // a new CompletionConnector.
-          if (oldSession) {
-            delete activeSessions[widget.id];
-            oldSession.dispose();
+          break;
+        }
+        default:
+          return;
+      }
+    };
+    document.addEventListener('keydown', evtKeydown, true);
+  }
+};
+
+const manager: JupyterFrontEndPlugin<ICompletionProviderManager> = {
+  id: COMPLETION_MANAGER_PLUGIN,
+  description: 'Provides the completion provider manager.',
+  requires: [ISettingRegistry],
+  optional: [IFormRendererRegistry],
+  provides: ICompletionProviderManager,
+  autoStart: true,
+  activate: (
+    app: JupyterFrontEnd,
+    settings: ISettingRegistry,
+    editorRegistry: IFormRendererRegistry | null
+  ): ICompletionProviderManager => {
+    const AVAILABLE_PROVIDERS = 'availableProviders';
+    const manager = new CompletionProviderManager();
+    const updateSetting = (
+      settingValues: ISettingRegistry.ISettings,
+      availableProviders: string[]
+    ): void => {
+      const providersData = settingValues.get(AVAILABLE_PROVIDERS);
+      const composite = settingValues.composite;
+      manager.setTimeout(composite.providerTimeout as number);
+      manager.setShowDocumentationPanel(
+        composite.showDocumentationPanel as boolean
+      );
+      manager.setContinuousHinting(composite.autoCompletion as boolean);
+      manager.setSuppressIfInlineCompleterActive(
+        composite.suppressIfInlineCompleterActive as boolean
+      );
+      const selectedProviders = providersData.user ?? providersData.composite;
+      const sortedProviders = Object.entries(selectedProviders ?? {})
+        .filter(val => val[1] >= 0 && availableProviders.includes(val[0]))
+        .sort(([, rank1], [, rank2]) => rank2 - rank1)
+        .map(item => item[0]);
+      manager.activateProvider(sortedProviders);
+    };
+
+    app.restored
+      .then(() => {
+        const availableProviders = [...manager.getProviders().entries()];
+        const availableProviderIDs = availableProviders.map(
+          ([key, value]) => key
+        );
+        settings.transform(COMPLETION_MANAGER_PLUGIN, {
+          fetch: plugin => {
+            const schema = plugin.schema.properties!;
+            const defaultValue: { [key: string]: number } = {};
+            availableProviders.forEach(([key, value], index) => {
+              defaultValue[key] = value.rank ?? (index + 1) * 10;
+            });
+            schema[AVAILABLE_PROVIDERS]['default'] = defaultValue;
+            return plugin;
           }
-          const session = sessions.connectTo(model);
-          handler.connector = new CompletionConnector({ session, editor });
-          activeSessions[widget.id] = session;
-        } else {
-          // If we didn't find a match, make sure
-          // the connector is the contextConnector and
-          // dispose of any previous connection.
-          handler.connector = contextConnector;
-          if (oldSession) {
-            delete activeSessions[widget.id];
-            oldSession.dispose();
-          }
+        });
+        const settingsPromise = settings.load(COMPLETION_MANAGER_PLUGIN);
+        settingsPromise
+          .then(settingValues => {
+            updateSetting(settingValues, availableProviderIDs);
+            settingValues.changed.connect(newSettings => {
+              updateSetting(newSettings, availableProviderIDs);
+            });
+          })
+          .catch(console.error);
+      })
+      .catch(console.error);
+
+    if (editorRegistry) {
+      const renderer: IFormRenderer = {
+        fieldRenderer: (props: FieldProps) => {
+          return renderAvailableProviders(props);
         }
       };
-      void Session.listRunning().then(models => {
-        onRunningChanged(sessions, models);
-      });
-      sessions.runningChanged.connect(onRunningChanged);
+      editorRegistry.addRenderer(
+        `${COMPLETION_MANAGER_PLUGIN}.availableProviders`,
+        renderer
+      );
+    }
 
-      // Initially create the handler with the contextConnector.
-      // If a kernel session is found matching this file editor,
-      // it will be replaced in onRunningChanged().
-      const handler = manager.register({
-        connector: contextConnector,
-        editor,
-        parent: widget
-      });
-
-      // When the widget is disposed, do some cleanup.
-      widget.disposed.connect(() => {
-        sessions.runningChanged.disconnect(onRunningChanged);
-        const session = activeSessions[widget.id];
-        if (session) {
-          delete activeSessions[widget.id];
-          session.dispose();
-        }
-      });
-    });
-
-    // Add console completer invoke command.
-    app.commands.addCommand(CommandIDs.invokeFile, {
-      execute: () => {
-        const id =
-          editorTracker.currentWidget && editorTracker.currentWidget.id;
-
-        if (id) {
-          return app.commands.execute(CommandIDs.invoke, { id });
-        }
-      }
-    });
-
-    // Add console completer select command.
-    app.commands.addCommand(CommandIDs.selectFile, {
-      execute: () => {
-        const id =
-          editorTracker.currentWidget && editorTracker.currentWidget.id;
-
-        if (id) {
-          return app.commands.execute(CommandIDs.select, { id });
-        }
-      }
-    });
-
-    // Set enter key for console completer select command.
-    app.commands.addKeyBinding({
-      command: CommandIDs.selectFile,
-      keys: ['Enter'],
-      selector: `.jp-FileEditor .jp-mod-completer-active`
-    });
+    return manager;
   }
 };
 
@@ -365,8 +500,9 @@ const files: JupyterFrontEndPlugin<void> = {
  */
 const plugins: JupyterFrontEndPlugin<any>[] = [
   manager,
-  consoles,
-  notebooks,
-  files
+  defaultProviders,
+  inlineHistoryProvider,
+  inlineCompleterFactory,
+  inlineCompleter
 ];
 export default plugins;

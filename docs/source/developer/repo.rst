@@ -1,7 +1,10 @@
+.. Copyright (c) Jupyter Development Team.
+.. Distributed under the terms of the Modified BSD License.
+
 .. _developer-guide:
 
 General Codebase Orientation
-----------------------------
+============================
 
 The ``jupyterlab`` repository is a monorepo: it contains code for many
 packages that are versioned and published independently.
@@ -10,11 +13,11 @@ In particular, there are many TypeScript packages and a single Python package.
 The Python package contains server-side code, and also distributes
 the bundled-and-compiled TypeScript code.
 
-See the `Contributing Guidelines <https://github.com/jupyterlab/jupyterlab/blob/master/CONTRIBUTING.md>`__
+See the `Contributing Guidelines <https://github.com/jupyterlab/jupyterlab/blob/main/CONTRIBUTING.md>`__
 for detailed developer installation instructions.
 
 Directories
-~~~~~~~~~~~
+-----------
 
 The repository contains a number of top-level directories, the contents of which
 are described here.
@@ -22,7 +25,7 @@ are described here.
 Python package: ``jupyterlab/``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-This, along with the ``setup.py``, comprises the Python code for the project.
+This, along with the ``pyproject.toml``, comprises the Python code for the project.
 This includes the notebook server extension, JupyterLab's command line interface,
 entrypoints, and Python tests.
 
@@ -53,8 +56,12 @@ the repository to be tested on `mybinder.org <https://mybinder.org>`__.
 This specification is developer focused.
 For a more user-focused binder see the
 `JupyterLab demo <https://mybinder.org/v2/gh/jupyterlab/jupyterlab-demo/master?urlpath=lab/tree/demo/Lorenz.ipynb>`__
+The binder instance adds two endpoints in addition to ``/lab``: ``/lab-dev`` and ``/lab-spliced``.
+The ``lab-dev`` endpoint is the equivalent of checking out the repo locally and running ``jupyter lab --dev-mode``.
+The ``lab-spliced`` endpoint is the equivalent of building JupyterLab in spliced mode and running ``jupyter lab``.
+See the `Development workflow for source extensions <../extension/extension_dev.html#development-workflow-for-source-extensions>`__ for more information on spliced mode.
 
-Build utilities: ``builtutils/``
+Build utilities: ``buildutils/``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 An ``npm`` package that contains several utility scripts for managing
@@ -79,7 +86,7 @@ Documentation: ``docs/``
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
 This directory contains the Sphinx project for this documentation.
-You can create an environment to build the documentation using ``conda create -f environment.yml``,
+You can install the dependencies for building the documentation using ``pip install .[docs]``,
 and you can build the documentation by running ``make html``.
 The entry point to the built docs will then be in ``docs/build/index.html``.
 
@@ -117,10 +124,3 @@ Test Utilities: ``testutils/``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 A small ``npm`` package which is aids in running the tests in ``tests/``.
-
-
-TypeDoc Theming: ``typedoc-theme``
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-A small theme used to help render our 
-`TypeDoc <http://jupyterlab.github.io/jupyterlab/index.html>`__ documentation. 

@@ -19,7 +19,7 @@ export class BuildManager {
    */
   constructor(options: BuildManager.IOptions = {}) {
     this.serverSettings =
-      options.serverSettings || ServerConnection.makeSettings();
+      options.serverSettings ?? ServerConnection.makeSettings();
     const { baseUrl, appUrl } = this.serverSettings;
     this._url = URLExt.join(baseUrl, appUrl, BUILD_SETTINGS_URL);
   }
@@ -82,7 +82,11 @@ export class BuildManager {
         throw new ServerConnection.ResponseError(response, 'Build aborted');
       }
       if (response.status !== 200) {
-        let message = `Build failed with ${response.status}, please run 'jupyter lab build' on the server for full output`;
+        const message = `Build failed with ${response.status}.
+
+        If you are experiencing the build failure after installing an extension (or trying to include previously installed extension after updating JupyterLab) please check the extension repository for new installation instructions as many extensions migrated to the prebuilt extensions system which no longer requires rebuilding JupyterLab (but uses a different installation procedure, typically involving a package manager such as 'pip' or 'conda').
+
+        If you specifically intended to install a source extension, please run 'jupyter lab build' on the server for full output.`;
         throw new ServerConnection.ResponseError(response, message);
       }
     });

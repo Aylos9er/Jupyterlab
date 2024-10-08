@@ -4,7 +4,7 @@
     "outDir": "lib",
     "rootDir": "src"
   },
-  "include": ["src/*"],
+  "include": ["src/*", "src/default.json"],
   "references": [
     {
       "path": "../apputils"
@@ -16,10 +16,22 @@
       "path": "../codeeditor"
     },
     {
+      "path": "../codemirror"
+    },
+    {
       "path": "../coreutils"
     },
     {
       "path": "../docregistry"
+    },
+    {
+      "path": "../documentsearch"
+    },
+    {
+      "path": "../lsp"
+    },
+    {
+      "path": "../nbformat"
     },
     {
       "path": "../observables"
@@ -31,7 +43,16 @@
       "path": "../services"
     },
     {
+      "path": "../settingregistry"
+    },
+    {
       "path": "../statusbar"
+    },
+    {
+      "path": "../toc"
+    },
+    {
+      "path": "../translation"
     },
     {
       "path": "../ui-components"

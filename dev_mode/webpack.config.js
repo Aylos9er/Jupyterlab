@@ -1,78 +1,116 @@
-/*-----------------------------------------------------------------------------
-| Copyright (c) Jupyter Development Team.
-| Distributed under the terms of the Modified BSD License.
-|----------------------------------------------------------------------------*/
+/*
+ * Copyright (c) Jupyter Development Team.
+ * Distributed under the terms of the Modified BSD License.
+ */
 
-var plib = require('path');
-var fs = require('fs-extra');
-var Handlebars = require('handlebars');
-var HtmlWebpackPlugin = require('html-webpack-plugin');
-var webpack = require('webpack');
-var DuplicatePackageCheckerPlugin = require('duplicate-package-checker-webpack-plugin');
-var BundleAnalyzerPlugin = require('webpack-bundle-analyzer')
-  .BundleAnalyzerPlugin;
+const path = require('path');
+const fs = require('fs-extra');
+const Handlebars = require('handlebars');
+const HtmlWebpackPlugin = require('html-webpack-plugin');
+const webpack = require('webpack');
+const merge = require('webpack-merge').default;
+const BundleAnalyzerPlugin =
+  require('webpack-bundle-analyzer').BundleAnalyzerPlugin;
+const baseConfig = require('@jupyterlab/builder/lib/webpack.config.base');
+const { ModuleFederationPlugin } = webpack.container;
 
-var Build = require('@jupyterlab/buildutils').Build;
-var WPPlugin = require('@jupyterlab/buildutils').WPPlugin;
-var package_data = require('./package.json');
+const Build = require('@jupyterlab/builder').Build;
+const WPPlugin = require('@jupyterlab/builder').WPPlugin;
+const packageData = require('./package.json');
 
 // Handle the extensions.
-var jlab = package_data.jupyterlab;
-var extensions = jlab.extensions;
-var mimeExtensions = jlab.mimeExtensions;
-var packageNames = Object.keys(mimeExtensions).concat(Object.keys(extensions));
+const jlab = packageData.jupyterlab;
+const { extensions, mimeExtensions } = jlab;
+
+// Deduplicated list of extension package names.
+const extensionPackages = [
+  ...new Set([...Object.keys(extensions), ...Object.keys(mimeExtensions)])
+];
 
 // Ensure a clear build directory.
-var buildDir = plib.resolve(jlab.buildDir);
+const buildDir = path.resolve(jlab.buildDir);
 if (fs.existsSync(buildDir)) {
   fs.removeSync(buildDir);
 }
 fs.ensureDirSync(buildDir);
 
-// Build the assets
-var extraConfig = Build.ensureAssets({
-  packageNames: packageNames,
-  output: jlab.outputDir
+const outputDir = path.resolve(jlab.outputDir);
+
+// Configuration to handle extension assets
+const extensionAssetConfig = Build.ensureAssets({
+  packageNames: extensionPackages,
+  output: outputDir
 });
 
-// Create the entry point file.
-var source = fs.readFileSync('index.js').toString();
-var template = Handlebars.compile(source);
-var data = {
+// Create the entry point and other assets in build directory.
+const source = fs.readFileSync('index.js').toString();
+const template = Handlebars.compile(source);
+const extData = {
   jupyterlab_extensions: extensions,
   jupyterlab_mime_extensions: mimeExtensions
 };
-var result = template(data);
+fs.writeFileSync(path.join(buildDir, 'index.out.js'), template(extData));
 
-fs.writeFileSync(plib.join(buildDir, 'index.out.js'), result);
-fs.copySync('./package.json', plib.join(buildDir, 'package.json'));
-fs.copySync(
-  plib.join(jlab.outputDir, 'imports.css'),
-  plib.join(buildDir, 'imports.css')
-);
+// Create the bootstrap file that loads federated extensions and calls the
+// initialization logic in index.out.js
+const entryPoint = path.join(buildDir, 'bootstrap.js');
+fs.copySync('./bootstrap.js', entryPoint);
+
+fs.copySync('./package.json', path.join(buildDir, 'package.json'));
+if (outputDir !== buildDir) {
+  fs.copySync(
+    path.join(outputDir, 'style.js'),
+    path.join(buildDir, 'style.js')
+  );
+}
 
 // Set up variables for the watch mode ignore plugins
-let watched = {};
-let ignoreCache = Object.create(null);
-Object.keys(jlab.linkedPackages).forEach(function(name) {
-  if (name in watched) return;
-  const localPkgPath = require.resolve(plib.join(name, 'package.json'));
-  watched[name] = plib.dirname(localPkgPath);
+const watched = {};
+const ignoreCache = Object.create(null);
+let watchNodeModules = false;
+Object.keys(jlab.linkedPackages).forEach(function (name) {
+  if (name in watched) {
+    return;
+  }
+  let localPkgPath = '';
+  try {
+    localPkgPath = require.resolve(path.join(name, 'package.json'));
+  } catch (e) {
+    return;
+  }
+  watched[name] = path.dirname(localPkgPath);
+  if (localPkgPath.indexOf('node_modules') !== -1) {
+    watchNodeModules = true;
+  }
 });
+
+// Set up source-map-loader to look in watched lib dirs
+const sourceMapRes = Object.values(watched).reduce((res, name) => {
+  res.push(new RegExp(name + '/lib'));
+  return res;
+}, []);
 
 /**
  * Sync a local path to a linked package path if they are files and differ.
+ * This is used by `jupyter lab --watch` to synchronize linked packages
+ * and has no effect in `jupyter lab --dev-mode --watch`.
  */
 function maybeSync(localPath, name, rest) {
-  const stats = fs.statSync(localPath);
+  let stats;
+  try {
+    stats = fs.statSync(localPath);
+  } catch (e) {
+    return;
+  }
+
   if (!stats.isFile(localPath)) {
     return;
   }
-  const source = fs.realpathSync(plib.join(jlab.linkedPackages[name], rest));
+  const source = fs.realpathSync(path.join(jlab.linkedPackages[name], rest));
   if (source === fs.realpathSync(localPath)) {
     return;
   }
-  fs.watchFile(source, { interval: 500 }, function(curr) {
+  fs.watchFile(source, { interval: 500 }, function (curr) {
     if (!curr || curr.nlink === 0) {
       return;
     }
@@ -89,34 +127,123 @@ function maybeSync(localPath, name, rest) {
  * in a package contained by the Jupyterlab repo. Used to ignore
  * files during a `--watch` build.
  */
-function ignored(path) {
-  path = plib.resolve(path);
-  if (path in ignoreCache) {
+function ignored(checkedPath) {
+  checkedPath = path.resolve(checkedPath);
+  if (checkedPath in ignoreCache) {
     // Bail if already found.
-    return ignoreCache[path];
+    return ignoreCache[checkedPath];
   }
 
   // Limit the watched files to those in our local linked package dirs.
   let ignore = true;
   Object.keys(watched).some(name => {
     const rootPath = watched[name];
-    const contained = path.indexOf(rootPath + plib.sep) !== -1;
-    if (path !== rootPath && !contained) {
+    const contained = checkedPath.indexOf(rootPath + path.sep) !== -1;
+    if (checkedPath !== rootPath && !contained) {
       return false;
     }
-    const rest = path.slice(rootPath.length);
+    const rest = checkedPath.slice(rootPath.length);
     if (rest.indexOf('node_modules') === -1) {
       ignore = false;
-      maybeSync(path, name, rest);
+      maybeSync(checkedPath, name, rest);
     }
     return true;
   });
-  ignoreCache[path] = ignore;
+  ignoreCache[checkedPath] = ignore;
   return ignore;
 }
 
+// Set up module federation sharing config
+const shared = {};
+
+// Make sure any resolutions are shared
+for (let [pkg, requiredVersion] of Object.entries(packageData.resolutions)) {
+  shared[pkg] = { requiredVersion };
+}
+
+// Add any extension packages that are not in resolutions (i.e., installed from npm)
+for (let pkg of extensionPackages) {
+  if (!shared[pkg]) {
+    shared[pkg] = {
+      requiredVersion: require(`${pkg}/package.json`).version
+    };
+  }
+}
+
+// Add dependencies and sharedPackage config from extension packages if they
+// are not already in the shared config. This means that if there is a
+// conflict, the resolutions package version is the one that is shared.
+const extraShared = [];
+for (let pkg of extensionPackages) {
+  let pkgShared = {};
+  let { dependencies = {}, jupyterlab: { sharedPackages = {} } = {} } = require(
+    `${pkg}/package.json`
+  );
+  for (let [dep, requiredVersion] of Object.entries(dependencies)) {
+    if (!shared[dep]) {
+      pkgShared[dep] = { requiredVersion };
+    }
+  }
+
+  // Overwrite automatic dependency sharing with custom sharing config
+  for (let [dep, config] of Object.entries(sharedPackages)) {
+    if (config === false) {
+      delete pkgShared[dep];
+    } else {
+      if ('bundled' in config) {
+        config.import = config.bundled;
+        delete config.bundled;
+      }
+      pkgShared[dep] = config;
+    }
+  }
+  extraShared.push(pkgShared);
+}
+
+// Now merge the extra shared config
+const mergedShare = {};
+for (let sharedConfig of extraShared) {
+  for (let [pkg, config] of Object.entries(sharedConfig)) {
+    // Do not override the basic share config from resolutions
+    if (shared[pkg]) {
+      continue;
+    }
+
+    // Add if we haven't seen the config before
+    if (!mergedShare[pkg]) {
+      mergedShare[pkg] = config;
+      continue;
+    }
+
+    // Choose between the existing config and this new config. We do not try
+    // to merge configs, which may yield a config no one wants
+    let oldConfig = mergedShare[pkg];
+
+    // if the old one has import: false, use the new one
+    if (oldConfig.import === false) {
+      mergedShare[pkg] = config;
+    }
+  }
+}
+
+Object.assign(shared, mergedShare);
+
+// Transform any file:// requiredVersion to the version number from the
+// imported package. This assumes (for simplicity) that the version we get
+// importing was installed from the file.
+for (let [pkg, { requiredVersion }] of Object.entries(shared)) {
+  if (requiredVersion && requiredVersion.startsWith('file:')) {
+    shared[pkg].requiredVersion = require(`${pkg}/package.json`).version;
+  }
+}
+
+// Add singleton package information
+for (let pkg of jlab.singletonPackages) {
+  shared[pkg].singleton = true;
+}
+
 const plugins = [
-  new DuplicatePackageCheckerPlugin({
+  new WPPlugin.NowatchDuplicatePackageCheckerPlugin({
     verbose: true,
     exclude(instance) {
       // ignore known duplicates
@@ -127,15 +254,21 @@ const plugins = [
   }),
   new HtmlWebpackPlugin({
     chunksSortMode: 'none',
-    template: plib.join('templates', 'template.html'),
+    template: path.join(__dirname, 'templates', 'template.html'),
     title: jlab.name || 'JupyterLab'
   }),
-  new webpack.HashedModuleIdsPlugin(),
-
   // custom plugin for ignoring files during a `--watch` build
   new WPPlugin.FilterWatchIgnorePlugin(ignored),
   // custom plugin that copies the assets to the static directory
-  new WPPlugin.FrontEndPlugin(buildDir, jlab.staticDir)
+  new WPPlugin.FrontEndPlugin(buildDir, jlab.staticDir),
+  new ModuleFederationPlugin({
+    library: {
+      type: 'var',
+      name: ['_JUPYTERLAB', 'CORE_LIBRARY_FEDERATION']
+    },
+    name: 'CORE_FEDERATION',
+    shared
+  })
 ];
 
 if (process.argv.includes('--analyze')) {
@@ -143,84 +276,49 @@ if (process.argv.includes('--analyze')) {
 }
 
 module.exports = [
-  {
+  merge(baseConfig, {
     mode: 'development',
     entry: {
-      main: ['whatwg-fetch', plib.resolve(buildDir, 'index.out.js')]
+      main: ['./publicpath', entryPoint]
     },
     output: {
-      path: plib.resolve(buildDir),
+      path: path.resolve(buildDir),
       publicPath: '{{page_config.fullStaticUrl}}/',
-      filename: '[name].[chunkhash].js'
+      filename: '[name].[contenthash].js'
     },
     optimization: {
       splitChunks: {
-        chunks: 'all'
+        chunks: 'all',
+        cacheGroups: {
+          jlab_core: {
+            test: /[\\/]node_modules[\\/]@(jupyterlab|lumino(?!\/datagrid))[\\/]/,
+            name: 'jlab_core'
+          }
+        }
       }
     },
     module: {
       rules: [
-        { test: /\.css$/, use: ['style-loader', 'css-loader'] },
-        { test: /\.md$/, use: 'raw-loader' },
-        { test: /\.txt$/, use: 'raw-loader' },
         {
           test: /\.js$/,
+          include: sourceMapRes,
           use: ['source-map-loader'],
-          enforce: 'pre',
-          // eslint-disable-next-line no-undef
-          exclude: /node_modules/
-        },
-        { test: /\.(jpg|png|gif)$/, use: 'file-loader' },
-        { test: /\.js.map$/, use: 'file-loader' },
-        {
-          test: /\.woff2(\?v=\d+\.\d+\.\d+)?$/,
-          use: 'url-loader?limit=10000&mimetype=application/font-woff'
-        },
-        {
-          test: /\.woff(\?v=\d+\.\d+\.\d+)?$/,
-          use: 'url-loader?limit=10000&mimetype=application/font-woff'
-        },
-        {
-          test: /\.ttf(\?v=\d+\.\d+\.\d+)?$/,
-          use: 'url-loader?limit=10000&mimetype=application/octet-stream'
-        },
-        {
-          test: /\.otf(\?v=\d+\.\d+\.\d+)?$/,
-          use: 'url-loader?limit=10000&mimetype=application/octet-stream'
-        },
-        { test: /\.eot(\?v=\d+\.\d+\.\d+)?$/, use: 'file-loader' },
-        {
-          // in css files, svg is loaded as a url formatted string
-          test: /\.svg(\?v=\d+\.\d+\.\d+)?$/,
-          issuer: { test: /\.css$/ },
-          use: {
-            loader: 'svg-url-loader',
-            options: { encoding: 'none', limit: 10000 }
-          }
-        },
-        {
-          // in ts and tsx files (both of which compile to js),
-          // svg is loaded as a raw string
-          test: /\.svg(\?v=\d+\.\d+\.\d+)?$/,
-          issuer: { test: /\.js$/ },
-          use: {
-            loader: 'raw-loader'
-          }
+          enforce: 'pre'
         }
       ]
     },
-    watchOptions: {
-      poll: 333
-    },
-    node: {
-      fs: 'empty'
-    },
-    bail: true,
     devtool: 'inline-source-map',
-    externals: ['node-fetch', 'ws'],
-    plugins,
-    stats: {
-      chunkModules: true
-    }
-  }
-].concat(extraConfig);
+    externals: ['ws'],
+    plugins
+  })
+].concat(extensionAssetConfig);
+
+// Needed to watch changes in linked extensions in node_modules
+// (jupyter lab --watch)
+// See https://github.com/webpack/webpack/issues/11612
+if (watchNodeModules) {
+  module.exports[0].snapshot = { managedPaths: [] };
+}
+
+const logPath = path.join(buildDir, 'build_log.json');
+fs.writeFileSync(logPath, JSON.stringify(module.exports, null, '  '));

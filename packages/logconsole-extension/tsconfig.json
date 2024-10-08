@@ -19,19 +19,16 @@
       "path": "../logconsole"
     },
     {
-      "path": "../mainmenu"
-    },
-    {
-      "path": "../notebook"
-    },
-    {
       "path": "../rendermime"
     },
     {
-      "path": "../services"
+      "path": "../settingregistry"
     },
     {
       "path": "../statusbar"
+    },
+    {
+      "path": "../translation"
     },
     {
       "path": "../ui-components"

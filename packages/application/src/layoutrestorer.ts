@@ -1,36 +1,31 @@
-/*-----------------------------------------------------------------------------
+/* -----------------------------------------------------------------------------
 | Copyright (c) Jupyter Development Team.
 | Distributed under the terms of the Modified BSD License.
 |----------------------------------------------------------------------------*/
 
 import { WidgetTracker } from '@jupyterlab/apputils';
-
-import { IDataConnector, IRestorer } from '@jupyterlab/coreutils';
-
-import { CommandRegistry } from '@phosphor/commands';
-
+import { IDataConnector, IRestorer } from '@jupyterlab/statedb';
+import { CommandRegistry } from '@lumino/commands';
 import {
   JSONExt,
   JSONObject,
+  PartialJSONObject,
   PromiseDelegate,
-  ReadonlyJSONValue,
+  ReadonlyPartialJSONObject,
+  ReadonlyPartialJSONValue,
   Token
-} from '@phosphor/coreutils';
-
-import { AttachedProperty } from '@phosphor/properties';
-
-import { DockPanel, Widget } from '@phosphor/widgets';
-
+} from '@lumino/coreutils';
+import { AttachedProperty } from '@lumino/properties';
+import { DockPanel, Widget } from '@lumino/widgets';
 import { ILabShell } from './shell';
 
-/* tslint:disable */
 /**
  * The layout restorer token.
  */
 export const ILayoutRestorer = new Token<ILayoutRestorer>(
-  '@jupyterlab/application:ILayoutRestorer'
+  '@jupyterlab/application:ILayoutRestorer',
+  'A service providing application layout restoration functionality. Use this to have your activities restored across page loads.'
 );
-/* tslint:enable */
 
 /**
  * A static class that restores the widgets of the application when it reloads.
@@ -121,6 +116,9 @@ export class LayoutRestorer implements ILayoutRestorer {
     this._connector = options.connector;
     this._first = options.first;
     this._registry = options.registry;
+    if (options.mode) {
+      this._mode = options.mode;
+    }
 
     void this._first
       .then(() => {
@@ -136,6 +134,17 @@ export class LayoutRestorer implements ILayoutRestorer {
       .then(() => {
         this._restored.resolve(void 0);
       });
+  }
+
+  /**
+   * Whether full layout restoration is deferred and is currently incomplete.
+   *
+   * #### Notes
+   * This flag is useful for tracking when the application has started in
+   * 'single-document' mode and the main area has not yet been restored.
+   */
+  get isDeferred(): boolean {
+    return this._deferred.length > 0;
   }
 
   /**
@@ -165,8 +174,11 @@ export class LayoutRestorer implements ILayoutRestorer {
     const blank: ILabShell.ILayout = {
       fresh: true,
       mainArea: null,
+      downArea: null,
       leftArea: null,
-      rightArea: null
+      rightArea: null,
+      topArea: null,
+      relativeSizes: null
     };
     const layout = this._connector.fetch(KEY);
 
@@ -177,13 +189,22 @@ export class LayoutRestorer implements ILayoutRestorer {
         return blank;
       }
 
-      const { main, left, right } = data as Private.ILayout;
+      const { main, down, left, right, relativeSizes, top } =
+        data as Private.ILayout;
 
       // If any data exists, then this is not a fresh session.
       const fresh = false;
 
       // Rehydrate main area.
-      const mainArea = this._rehydrateMainArea(main);
+      let mainArea: ILabShell.IMainArea | null = null;
+      if (this._mode === 'multiple-document') {
+        mainArea = this._rehydrateMainArea(main);
+      } else {
+        this._deferredMainArea = main;
+      }
+
+      // Rehydrate down area.
+      const downArea = this._rehydrateDownArea(down);
 
       // Rehydrate left area.
       const leftArea = this._rehydrateSideArea(left);
@@ -191,7 +212,15 @@ export class LayoutRestorer implements ILayoutRestorer {
       // Rehydrate right area.
       const rightArea = this._rehydrateSideArea(right);
 
-      return { fresh, mainArea, leftArea, rightArea };
+      return {
+        fresh,
+        mainArea,
+        downArea,
+        leftArea,
+        rightArea,
+        relativeSizes: relativeSizes || null,
+        topArea: (top as any) ?? null
+      };
     } catch (error) {
       return blank;
     }
@@ -204,22 +233,17 @@ export class LayoutRestorer implements ILayoutRestorer {
    *
    * @param options - The restoration options.
    */
-  restore(
+  async restore(
     tracker: WidgetTracker,
     options: IRestorer.IOptions<Widget>
   ): Promise<any> {
-    const warning = 'restore() can only be called before `first` has resolved.';
-
     if (this._firstDone) {
-      console.warn(warning);
-      return Promise.reject(warning);
+      throw new Error('restore() must be called before `first` has resolved.');
     }
 
     const { namespace } = tracker;
     if (this._trackers.has(namespace)) {
-      const warning = `A tracker namespaced ${namespace} was already restored.`;
-      console.warn(warning);
-      return Promise.reject(warning);
+      throw new Error(`The tracker "${namespace}" is already restored.`);
     }
 
     const { args, command, name, when } = options;
@@ -246,44 +270,78 @@ export class LayoutRestorer implements ILayoutRestorer {
     });
 
     const first = this._first;
-    const promise = tracker
-      .restore({
-        args: args || (() => JSONExt.emptyObject),
-        command,
-        connector: this._connector,
-        name,
-        registry: this._registry,
-        when: when ? [first].concat(when) : first
-      })
-      .catch(error => {
-        console.error(error);
-      });
+    if (this._mode == 'multiple-document') {
+      const promise = tracker
+        .restore({
+          args: args || (() => JSONExt.emptyObject),
+          command,
+          connector: this._connector,
+          name,
+          registry: this._registry,
+          when: when ? [first].concat(when) : first
+        })
+        .catch(error => {
+          console.error(error);
+        });
 
-    this._promises.push(promise);
-    return promise;
+      this._promises.push(promise);
+
+      return promise;
+    }
+
+    tracker.defer({
+      args: args || (() => JSONExt.emptyObject),
+      command,
+      connector: this._connector,
+      name,
+      registry: this._registry,
+      when: when ? [first].concat(when) : first
+    });
+    this._deferred.push(tracker);
+  }
+
+  /**
+   * Restore the application layout if its restoration has been deferred.
+   *
+   * @returns - the rehydrated main area.
+   */
+  async restoreDeferred(): Promise<ILabShell.IMainArea | null> {
+    if (!this.isDeferred) {
+      return null;
+    }
+
+    // Empty the deferred list and wait for all trackers to restore.
+    const wait = Promise.resolve();
+    const promises = this._deferred.map(t => wait.then(() => t.restore()));
+    this._deferred.length = 0;
+    await Promise.all(promises);
+
+    // Rehydrate the main area layout.
+    return this._rehydrateMainArea(this._deferredMainArea);
   }
 
   /**
    * Save the layout state for the application.
    */
-  save(data: ILabShell.ILayout): Promise<void> {
+  save(layout: ILabShell.ILayout): Promise<void> {
     // If there are promises that are unresolved, bail.
     if (!this._promisesDone) {
-      let warning = 'save() was called prematurely.';
+      const warning = 'save() was called prematurely.';
       console.warn(warning);
       return Promise.reject(warning);
     }
 
-    let dehydrated: Private.ILayout = {};
+    const dehydrated: Private.ILayout = {};
 
-    // Dehydrate main area.
-    dehydrated.main = this._dehydrateMainArea(data.mainArea);
-
-    // Dehydrate left area.
-    dehydrated.left = this._dehydrateSideArea(data.leftArea);
-
-    // Dehydrate right area.
-    dehydrated.right = this._dehydrateSideArea(data.rightArea);
+    // Save the cached main area layout if restoration is deferred.
+    dehydrated.main = this.isDeferred
+      ? this._deferredMainArea
+      : this._dehydrateMainArea(layout.mainArea);
+    dehydrated.down = this._dehydrateDownArea(layout.downArea);
+    dehydrated.left = this._dehydrateSideArea(layout.leftArea);
+    dehydrated.right = this._dehydrateSideArea(layout.rightArea);
+    dehydrated.relativeSizes = layout.relativeSizes;
+    dehydrated.top = { ...layout.topArea };
 
     return this._connector.save(KEY, dehydrated);
   }
@@ -301,7 +359,7 @@ export class LayoutRestorer implements ILayoutRestorer {
   }
 
   /**
-   * Reydrate a serialized main area description object.
+   * Rehydrate a serialized main area description object.
    *
    * #### Notes
    * This function consumes data that can become corrupted, so it uses type
@@ -317,46 +375,50 @@ export class LayoutRestorer implements ILayoutRestorer {
   }
 
   /**
-   * Dehydrate a side area description into a serializable object.
+   * Dehydrate a down area description into a serializable object.
    */
-  private _dehydrateSideArea(
-    area?: ILabShell.ISideArea | null
-  ): Private.ISideArea | null {
+  private _dehydrateDownArea(
+    area: ILabShell.IDownArea | null
+  ): Private.IDownArea | null {
     if (!area) {
       return null;
     }
-    let dehydrated: Private.ISideArea = { collapsed: area.collapsed };
+
+    const dehydrated: Private.IDownArea = {
+      size: area.size
+    };
+
     if (area.currentWidget) {
-      let current = Private.nameProperty.get(area.currentWidget);
+      const current = Private.nameProperty.get(area.currentWidget);
       if (current) {
         dehydrated.current = current;
       }
     }
+
     if (area.widgets) {
       dehydrated.widgets = area.widgets
         .map(widget => Private.nameProperty.get(widget))
         .filter(name => !!name);
     }
+
     return dehydrated;
   }
 
   /**
-   * Reydrate a serialized side area description object.
+   * Rehydrate a serialized side area description object.
    *
    * #### Notes
    * This function consumes data that can become corrupted, so it uses type
    * coercion to guarantee the dehydrated object is safely processed.
    */
-  private _rehydrateSideArea(
-    area?: Private.ISideArea | null
-  ): ILabShell.ISideArea {
+  private _rehydrateDownArea(
+    area?: Private.IDownArea | null
+  ): ILabShell.IDownArea | null {
     if (!area) {
-      return { collapsed: true, currentWidget: null, widgets: null };
+      return { currentWidget: null, size: 0.0, widgets: null };
     }
-    let internal = this._widgets;
-    const collapsed = area.hasOwnProperty('collapsed')
-      ? !!area.collapsed
-      : false;
+
+    const internal = this._widgets;
     const currentWidget =
       area.current && internal.has(`${area.current}`)
         ? internal.get(`${area.current}`)
@@ -369,9 +431,96 @@ export class LayoutRestorer implements ILayoutRestorer {
           )
           .filter(widget => !!widget);
     return {
+      currentWidget: currentWidget!,
+      size: area.size ?? 0.0,
+      widgets: widgets as Widget[] | null
+    };
+  }
+
+  /**
+   * Dehydrate a side area description into a serializable object.
+   */
+  private _dehydrateSideArea(
+    area?: ILabShell.ISideArea | null
+  ): Private.ISideArea | null {
+    if (!area) {
+      return null;
+    }
+    const dehydrated: Private.ISideArea = {
+      collapsed: area.collapsed,
+      visible: area.visible
+    };
+    if (area.currentWidget) {
+      const current = Private.nameProperty.get(area.currentWidget);
+      if (current) {
+        dehydrated.current = current;
+      }
+    }
+    if (area.widgets) {
+      dehydrated.widgets = area.widgets
+        .map(widget => Private.nameProperty.get(widget))
+        .filter(name => !!name);
+    }
+    if (area.widgetStates) {
+      dehydrated.widgetStates = area.widgetStates as {
+        [id: string]: {
+          sizes: number[] | null;
+          expansionStates: boolean[] | null;
+        };
+      };
+    }
+    return dehydrated;
+  }
+
+  /**
+   * Rehydrate a serialized side area description object.
+   *
+   * #### Notes
+   * This function consumes data that can become corrupted, so it uses type
+   * coercion to guarantee the dehydrated object is safely processed.
+   */
+  private _rehydrateSideArea(
+    area?: Private.ISideArea | null
+  ): ILabShell.ISideArea {
+    if (!area) {
+      return {
+        collapsed: true,
+        currentWidget: null,
+        visible: true,
+        widgets: null,
+        widgetStates: {
+          ['null']: {
+            sizes: null,
+            expansionStates: null
+          }
+        }
+      };
+    }
+    const internal = this._widgets;
+    const collapsed = area.collapsed ?? false;
+    const currentWidget =
+      area.current && internal.has(`${area.current}`)
+        ? internal.get(`${area.current}`)
+        : null;
+    const widgets = !Array.isArray(area.widgets)
+      ? null
+      : area.widgets
+          .map(name =>
+            internal.has(`${name}`) ? internal.get(`${name}`) : null
+          )
+          .filter(widget => !!widget);
+    const widgetStates = area.widgetStates as {
+      [id: string]: {
+        sizes: number[] | null;
+        expansionStates: boolean[] | null;
+      };
+    };
+    return {
       collapsed,
       currentWidget: currentWidget!,
-      widgets: widgets as Widget[] | null
+      widgets: widgets as Widget[] | null,
+      visible: area.visible ?? true,
+      widgetStates: widgetStates
     };
   }
 
@@ -379,11 +528,13 @@ export class LayoutRestorer implements ILayoutRestorer {
    * Handle a widget disposal.
    */
   private _onWidgetDisposed(widget: Widget): void {
-    let name = Private.nameProperty.get(widget);
+    const name = Private.nameProperty.get(widget);
     this._widgets.delete(name);
   }
 
-  private _connector: IDataConnector<ReadonlyJSONValue>;
+  private _connector: IDataConnector<ReadonlyPartialJSONValue>;
+  private _deferred = new Array<WidgetTracker>();
+  private _deferredMainArea?: Private.IMainArea | null = null;
   private _first: Promise<any>;
   private _firstDone = false;
   private _promisesDone = false;
@@ -392,6 +543,7 @@ export class LayoutRestorer implements ILayoutRestorer {
   private _registry: CommandRegistry;
   private _trackers = new Set<string>();
   private _widgets = new Map<string, Widget>();
+  private _mode: DockPanel.Mode = 'multiple-document';
 }
 
 /**
@@ -405,7 +557,7 @@ export namespace LayoutRestorer {
     /**
      * The data connector used for layout saving and fetching.
      */
-    connector: IDataConnector<ReadonlyJSONValue>;
+    connector: IDataConnector<ReadonlyPartialJSONValue>;
 
     /**
      * The initial promise that has to be resolved before restoration.
@@ -419,6 +571,11 @@ export namespace LayoutRestorer {
      * The application command registry.
      */
     registry: CommandRegistry;
+
+    /**
+     * The DockPanel mode.
+     */
+    mode?: DockPanel.Mode;
   }
 }
 
@@ -434,11 +591,16 @@ namespace Private {
    * It is meant to be a data structure can translate into a `LabShell.ILayout`
    * data structure for consumption by the application shell.
    */
-  export interface ILayout extends JSONObject {
+  export interface ILayout extends PartialJSONObject {
     /**
      * The main area of the user interface.
      */
     main?: IMainArea | null;
+
+    /**
+     * The down area of the user interface
+     */
+    down?: IDownArea | null;
 
     /**
      * The left area of the user interface.
@@ -449,12 +611,22 @@ namespace Private {
      * The right area of the user interface.
      */
     right?: ISideArea | null;
+
+    /**
+     * The relatives sizes of the areas of the user interface.
+     */
+    relativeSizes?: number[] | null;
+
+    /**
+     * The restorable description of the top area in the user interface.
+     */
+    top?: ITopArea | null;
   }
 
   /**
    * The restorable description of the main application area.
    */
-  export interface IMainArea extends JSONObject {
+  export interface IMainArea extends PartialJSONObject {
     /**
      * The current widget that has application focus.
      */
@@ -474,7 +646,7 @@ namespace Private {
   /**
    * The restorable description of a sidebar in the user interface.
    */
-  export interface ISideArea extends JSONObject {
+  export interface ISideArea extends PartialJSONObject {
     /**
      * A flag denoting whether the sidebar has been collapsed.
      */
@@ -484,6 +656,11 @@ namespace Private {
      * The current widget that has side area focus.
      */
     current?: string | null;
+
+    /**
+     * A flag denoting whether the side tab bar is visible.
+     */
+    visible?: boolean | null;
 
     /**
      * The collection of widgets held by the sidebar.
@@ -512,6 +689,16 @@ namespace Private {
   }
 
   /**
+   * The restorable description of the top area in the user interface.
+   */
+  export interface ITopArea extends PartialJSONObject {
+    /**
+     * Top area visibility in simple mode.
+     */
+    readonly simpleVisibility?: boolean;
+  }
+
+  /**
    * The restorable description of a split area in the user interface.
    */
   export interface ISplitArea extends JSONObject {
@@ -534,6 +721,28 @@ namespace Private {
      * The sizes of the children.
      */
     sizes: Array<number>;
+  }
+
+  /**
+   * The restorable description of the down area in the user interface
+   */
+  export interface IDownArea extends PartialJSONObject {
+    /**
+     * The current widget that has application focus.
+     */
+    current?: string | null;
+
+    /**
+     * Vertical relative size of the down area
+     *
+     * The main area will take the rest of the height
+     */
+    size?: number | null;
+
+    /**
+     * The widgets in the down area.
+     */
+    widgets?: Array<string> | null;
   }
 
   /**
@@ -568,7 +777,9 @@ namespace Private {
       type: 'split-area',
       orientation: area.orientation,
       sizes: area.sizes,
-      children: area.children.map(serializeArea).filter(area => !!area)
+      children: area.children
+        .map(serializeArea)
+        .filter(area => !!area) as Array<ITabArea | ISplitArea>
     };
   }
 
@@ -576,13 +787,12 @@ namespace Private {
    * Return a dehydrated, serializable version of the main dock panel.
    */
   export function serializeMain(area: ILabShell.IMainArea): IMainArea {
-    let dehydrated: IMainArea = {
+    const dehydrated: IMainArea = {
       dock: (area && area.dock && serializeArea(area.dock.main)) || null
     };
     if (area) {
-      dehydrated.mode = area.mode;
       if (area.currentWidget) {
-        let current = Private.nameProperty.get(area.currentWidget);
+        const current = Private.nameProperty.get(area.currentWidget);
         if (current) {
           dehydrated.current = current;
         }
@@ -619,7 +829,7 @@ namespace Private {
 
     if (type === 'tab-area') {
       const { currentIndex, widgets } = area as ITabArea;
-      let hydrated: ILabShell.AreaConfig = {
+      const hydrated: ILabShell.AreaConfig = {
         type: 'tab-area',
         currentIndex: currentIndex || 0,
         widgets:
@@ -639,7 +849,7 @@ namespace Private {
     }
 
     const { orientation, sizes, children } = area as ISplitArea;
-    let hydrated: ILabShell.AreaConfig = {
+    const hydrated: ILabShell.AreaConfig = {
       type: 'split-area',
       orientation: orientation,
       sizes: sizes || [],
@@ -664,7 +874,7 @@ namespace Private {
    * For fault tolerance, types are manually checked in deserialization.
    */
   export function deserializeMain(
-    area: JSONObject,
+    area: ReadonlyPartialJSONObject,
     names: Map<string, Widget>
   ): ILabShell.IMainArea | null {
     if (!area) {
@@ -673,13 +883,10 @@ namespace Private {
 
     const name = (area as any).current || null;
     const dock = (area as any).dock || null;
-    const mode = (area as any).mode || null;
 
     return {
       currentWidget: (name && names.has(name) && names.get(name)) || null,
-      dock: dock ? { main: deserializeArea(dock, names) } : null,
-      mode:
-        mode === 'multiple-document' || mode === 'single-document' ? mode : null
+      dock: dock ? { main: deserializeArea(dock, names) } : null
     };
   }
 }

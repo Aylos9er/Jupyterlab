@@ -1,4 +1,4 @@
-/*-----------------------------------------------------------------------------
+/* -----------------------------------------------------------------------------
 | Copyright (c) Jupyter Development Team.
 | Distributed under the terms of the Modified BSD License.
 |----------------------------------------------------------------------------*/
@@ -8,8 +8,9 @@ import * as glob from 'glob';
 import * as path from 'path';
 import * as utils from './utils';
 
-utils.run('npm run clean:slate');
-utils.run('lerna run prepublishOnly');
+utils.exitOnUncaughtException();
+
+utils.run('npm run build:packages');
 
 utils.getLernaPaths().forEach(pkgPath => {
   const pkgData = utils.readJSONFile(path.join(pkgPath, 'package.json'));
@@ -19,7 +20,7 @@ utils.getLernaPaths().forEach(pkgPath => {
   if (!pkgData.public) {
     return;
   }
-  console.log(`Checking ${name}...`);
+  console.debug(`Checking ${name}...`);
 
   // Make sure each glob resolves to at least one file.
   pkgData.files.forEach((fGlob: string) => {

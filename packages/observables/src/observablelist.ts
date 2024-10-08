@@ -1,23 +1,14 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import {
-  ArrayExt,
-  ArrayIterator,
-  IIterator,
-  IterableOrArrayLike,
-  each,
-  toArray
-} from '@phosphor/algorithm';
-
-import { IDisposable } from '@phosphor/disposable';
-
-import { ISignal, Signal } from '@phosphor/signaling';
+import { ArrayExt } from '@lumino/algorithm';
+import { IDisposable } from '@lumino/disposable';
+import { ISignal, Signal } from '@lumino/signaling';
 
 /**
  * A list which can be observed for changes.
  */
-export interface IObservableList<T> extends IDisposable {
+export interface IObservableList<T> extends IDisposable, Iterable<T> {
   /**
    * A signal emitted when the list has changed.
    */
@@ -35,19 +26,6 @@ export interface IObservableList<T> extends IDisposable {
    * This is a read-only property.
    */
   length: number;
-
-  /**
-   * Create an iterator over the values in the list.
-   *
-   * @returns A new iterator starting at the front of the list.
-   *
-   * #### Complexity
-   * Constant.
-   *
-   * #### Iterator Validity
-   * No changes.
-   */
-  iter(): IIterator<T>;
 
   /**
    * Remove all values from the list.
@@ -70,7 +48,7 @@ export interface IObservableList<T> extends IDisposable {
    * #### Undefined Behavior
    * An `index` which is non-integral or out of range.
    */
-  get(index: number): T | undefined;
+  get(index: number): T;
 
   /**
    * Insert a value into the list at a specific index.
@@ -112,12 +90,12 @@ export interface IObservableList<T> extends IDisposable {
    * #### Undefined Behavior.
    * An `index` which is non-integral.
    */
-  insertAll(index: number, values: IterableOrArrayLike<T>): void;
+  insertAll(index: number, values: Iterable<T>): void;
 
   /**
    * Move a value from one index to another.
    *
-   * @parm fromIndex - The index of the element to move.
+   * @param fromIndex - The index of the element to move.
    *
    * @param toIndex - The index to move the element to.
    *
@@ -151,7 +129,7 @@ export interface IObservableList<T> extends IDisposable {
   /**
    * Push a set of values to the back of the list.
    *
-   * @param values - An iterable or array-like set of values to add.
+   * @param values - An iterable set of values to add.
    *
    * @returns The new length of the list.
    *
@@ -161,7 +139,7 @@ export interface IObservableList<T> extends IDisposable {
    * #### Iterator Validity
    * No changes.
    */
-  pushAll(values: IterableOrArrayLike<T>): number;
+  pushAll(values: Iterable<T>): number;
 
   /**
    * Remove and return the value at a specific index.
@@ -310,10 +288,10 @@ export class ObservableList<T> implements IObservableList<T> {
    * Construct a new observable map.
    */
   constructor(options: ObservableList.IOptions<T> = {}) {
-    if (options.values !== void 0) {
-      each(options.values, value => {
+    if (options.values) {
+      for (const value of options.values) {
         this._array.push(value);
-      });
+      }
     }
     this._itemCmp = options.itemCmp || Private.itemCmp;
   }
@@ -369,8 +347,8 @@ export class ObservableList<T> implements IObservableList<T> {
    * #### Iterator Validity
    * No changes.
    */
-  iter(): IIterator<T> {
-    return new ArrayIterator(this._array);
+  [Symbol.iterator](): IterableIterator<T> {
+    return this._array[Symbol.iterator]();
   }
 
   /**
@@ -383,7 +361,7 @@ export class ObservableList<T> implements IObservableList<T> {
    * #### Undefined Behavior
    * An `index` which is non-integral or out of range.
    */
-  get(index: number): T | undefined {
+  get(index: number): T {
     return this._array[index];
   }
 
@@ -404,12 +382,12 @@ export class ObservableList<T> implements IObservableList<T> {
    * An `index` which is non-integral or out of range.
    */
   set(index: number, value: T): void {
-    let oldValue = this._array[index];
+    const oldValue = this._array[index];
     if (value === undefined) {
       throw new Error('Cannot set an undefined item');
     }
     // Bail if the value does not change.
-    let itemCmp = this._itemCmp;
+    const itemCmp = this._itemCmp;
     if (itemCmp(oldValue, value)) {
       return;
     }
@@ -433,11 +411,15 @@ export class ObservableList<T> implements IObservableList<T> {
    * #### Complexity
    * Constant.
    *
+   * #### Notes
+   * By convention, the oldIndex is set to -1 to indicate
+   * an push operation.
+   *
    * #### Iterator Validity
    * No changes.
    */
   push(value: T): number {
-    let num = this._array.push(value);
+    const num = this._array.push(value);
     this._changed.emit({
       type: 'add',
       oldIndex: -1,
@@ -464,14 +446,24 @@ export class ObservableList<T> implements IObservableList<T> {
    * #### Notes
    * The `index` will be clamped to the bounds of the list.
    *
+   * By convention, the oldIndex is set to -2 to indicate
+   * an insert operation.
+   *
+   * The value -2 as oldIndex can be used to distinguish from the push
+   * method which will use a value -1.
+   *
    * #### Undefined Behavior
    * An `index` which is non-integral.
    */
   insert(index: number, value: T): void {
-    ArrayExt.insert(this._array, index, value);
+    if (index === this._array.length) {
+      this._array.push(value);
+    } else {
+      ArrayExt.insert(this._array, index, value);
+    }
     this._changed.emit({
       type: 'add',
-      oldIndex: -1,
+      oldIndex: -2,
       newIndex: index,
       oldValues: [],
       newValues: [value]
@@ -493,8 +485,8 @@ export class ObservableList<T> implements IObservableList<T> {
    * Iterators pointing at the removed value and beyond are invalidated.
    */
   removeValue(value: T): number {
-    let itemCmp = this._itemCmp;
-    let index = ArrayExt.findFirstIndex(this._array, item => {
+    const itemCmp = this._itemCmp;
+    const index = ArrayExt.findFirstIndex(this._array, item => {
       return itemCmp(item, value);
     });
     this.remove(index);
@@ -519,7 +511,7 @@ export class ObservableList<T> implements IObservableList<T> {
    * An `index` which is non-integral.
    */
   remove(index: number): T | undefined {
-    let value = ArrayExt.removeAt(this._array, index);
+    const value = ArrayExt.removeAt(this._array, index);
     if (value === undefined) {
       return;
     }
@@ -543,7 +535,7 @@ export class ObservableList<T> implements IObservableList<T> {
    * All current iterators are invalidated.
    */
   clear(): void {
-    let copy = this._array.slice();
+    const copy = this._array.slice();
     this._array.length = 0;
     this._changed.emit({
       type: 'remove',
@@ -557,7 +549,7 @@ export class ObservableList<T> implements IObservableList<T> {
   /**
    * Move a value from one index to another.
    *
-   * @parm fromIndex - The index of the element to move.
+   * @param fromIndex - The index of the element to move.
    *
    * @param toIndex - The index to move the element to.
    *
@@ -575,7 +567,7 @@ export class ObservableList<T> implements IObservableList<T> {
     if (this.length <= 1 || fromIndex === toIndex) {
       return;
     }
-    let values = [this._array[fromIndex]];
+    const values = [this._array[fromIndex]];
     ArrayExt.move(this._array, fromIndex, toIndex);
     this._changed.emit({
       type: 'move',
@@ -589,27 +581,31 @@ export class ObservableList<T> implements IObservableList<T> {
   /**
    * Push a set of values to the back of the list.
    *
-   * @param values - An iterable or array-like set of values to add.
+   * @param values - An iterable set of values to add.
    *
    * @returns The new length of the list.
    *
    * #### Complexity
    * Linear.
    *
+   * #### Notes
+   * By convention, the oldIndex is set to -1 to indicate
+   * an push operation.
+   *
    * #### Iterator Validity
    * No changes.
    */
-  pushAll(values: IterableOrArrayLike<T>): number {
-    let newIndex = this.length;
-    each(values, value => {
+  pushAll(values: Iterable<T>): number {
+    const newIndex = this.length;
+    for (const value of values) {
       this._array.push(value);
-    });
+    }
     this._changed.emit({
       type: 'add',
       oldIndex: -1,
       newIndex,
       oldValues: [],
-      newValues: toArray(values)
+      newValues: Array.from(values)
     });
     return this.length;
   }
@@ -629,21 +625,23 @@ export class ObservableList<T> implements IObservableList<T> {
    *
    * #### Notes
    * The `index` will be clamped to the bounds of the list.
+   * By convention, the oldIndex is set to -2 to indicate
+   * an insert operation.
    *
    * #### Undefined Behavior.
    * An `index` which is non-integral.
    */
-  insertAll(index: number, values: IterableOrArrayLike<T>): void {
-    let newIndex = index;
-    each(values, value => {
+  insertAll(index: number, values: Iterable<T>): void {
+    const newIndex = index;
+    for (const value of values) {
       ArrayExt.insert(this._array, index++, value);
-    });
+    }
     this._changed.emit({
       type: 'add',
-      oldIndex: -1,
+      oldIndex: -2,
       newIndex,
       oldValues: [],
-      newValues: toArray(values)
+      newValues: Array.from(values)
     });
   }
 
@@ -666,7 +664,7 @@ export class ObservableList<T> implements IObservableList<T> {
    * A `startIndex` or `endIndex` which is non-integral.
    */
   removeRange(startIndex: number, endIndex: number): number {
-    let oldValues = this._array.slice(startIndex, endIndex);
+    const oldValues = this._array.slice(startIndex, endIndex);
     for (let i = startIndex; i < endIndex; i++) {
       ArrayExt.removeAt(this._array, startIndex);
     }
@@ -697,7 +695,7 @@ export namespace ObservableList {
     /**
      * An optional initial set of values.
      */
-    values?: IterableOrArrayLike<T>;
+    values?: Iterable<T>;
 
     /**
      * The item comparison function for change detection on `set`.
@@ -715,7 +713,7 @@ namespace Private {
   /**
    * The default strict equality item cmp.
    */
-  export function itemCmp(first: any, second: any): boolean {
+  export function itemCmp<T>(first: T, second: T): boolean {
     return first === second;
   }
 }

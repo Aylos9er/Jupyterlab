@@ -1,11 +1,9 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import { ArrayExt } from '@phosphor/algorithm';
-
-import { ElementExt } from '@phosphor/domutils';
-
-import { UUID } from '@phosphor/coreutils';
+import { ArrayExt } from '@lumino/algorithm';
+import { UUID } from '@lumino/coreutils';
+import { ElementExt } from '@lumino/domutils';
 
 /**
  * The namespace for DOM utilities.
@@ -26,6 +24,7 @@ export namespace DOMUtils {
 
   /**
    * Find the first element matching a class name.
+   * Only use this function when the element existence is guaranteed.
    */
   export function findElement(
     parent: HTMLElement,
@@ -41,9 +40,9 @@ export namespace DOMUtils {
     parent: HTMLElement,
     className: string
   ): HTMLCollectionOf<HTMLElement> {
-    return parent.getElementsByClassName(className) as HTMLCollectionOf<
-      HTMLElement
-    >;
+    return parent.getElementsByClassName(
+      className
+    ) as HTMLCollectionOf<HTMLElement>;
   }
 
   /**
@@ -51,5 +50,23 @@ export namespace DOMUtils {
    */
   export function createDomID(): string {
     return `id-${UUID.uuid4()}`;
+  }
+
+  /**
+   * Check whether the active element descendant from given parent is editable.
+   * When checking active elements it includes elements in the open shadow DOM.
+   */
+  export function hasActiveEditableElement(
+    parent: Node | DocumentFragment,
+    root: ShadowRoot | Document = document
+  ): boolean {
+    const element = root.activeElement;
+    return !!(
+      element &&
+      parent.contains(element) &&
+      (element.matches(':read-write') ||
+        (element.shadowRoot &&
+          hasActiveEditableElement(element.shadowRoot, element.shadowRoot)))
+    );
   }
 }

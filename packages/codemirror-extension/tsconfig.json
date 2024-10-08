@@ -16,19 +16,16 @@
       "path": "../codemirror"
     },
     {
-      "path": "../coreutils"
-    },
-    {
-      "path": "../docregistry"
-    },
-    {
-      "path": "../fileeditor"
-    },
-    {
-      "path": "../mainmenu"
+      "path": "../settingregistry"
     },
     {
       "path": "../statusbar"
+    },
+    {
+      "path": "../translation"
+    },
+    {
+      "path": "../ui-components"
     }
   ]
 }

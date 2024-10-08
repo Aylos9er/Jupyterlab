@@ -1,17 +1,15 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import { ISignal } from '@phosphor/signaling';
-
-import { Token } from '@phosphor/coreutils';
-
-import { IDisposable } from '@phosphor/disposable';
-
-import { Widget } from '@phosphor/widgets';
+import { Token } from '@lumino/coreutils';
+import { IDisposable } from '@lumino/disposable';
+import { ISignal } from '@lumino/signaling';
+import { Widget } from '@lumino/widgets';
 
 // tslint:disable-next-line:variable-name
 export const IStatusBar = new Token<IStatusBar>(
-  '@jupyterlab/statusbar:IStatusBar'
+  '@jupyterlab/statusbar:IStatusBar',
+  'A service for the status bar on the application. Use this if you want to add new status bar items.'
 );
 
 /**
@@ -21,11 +19,10 @@ export interface IStatusBar {
   /**
    * Register a new status item.
    *
-   * @param id - a unique id for the status item.
+   * @param id a unique id for the status item.
+   * @param statusItem The options for how to add the status item.
    *
-   * @param options - The options for how to add the status item.
-   *
-   * @returns an `IDisposable` that can be disposed to remove the item.
+   * @returns an {@link IDisposable} that can be disposed to remove the item.
    */
   registerStatusItem(id: string, statusItem: IStatusBar.IItem): IDisposable;
 }
@@ -56,6 +53,11 @@ export namespace IStatusBar {
      *  Ordering of Items -- higher rank items are closer to the middle.
      */
     rank?: number;
+
+    /**
+     *  Displaying Items based on zoom priority -- higher zoom priority gets prioritised when zoom levels increase
+     */
+    priority?: number;
 
     /**
      * Whether the item is shown or hidden.

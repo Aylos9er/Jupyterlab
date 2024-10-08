@@ -1,85 +1,126 @@
-/*-----------------------------------------------------------------------------
+/* -----------------------------------------------------------------------------
 | Copyright (c) Jupyter Development Team.
 | Distributed under the terms of the Modified BSD License.
 |----------------------------------------------------------------------------*/
 
-import commander from 'commander';
-import * as crypto from 'crypto';
-import * as fs from 'fs-extra';
+import { program as commander } from 'commander';
 import * as path from 'path';
+import * as os from 'os';
 import { handlePackage } from './update-dist-tag';
 import * as utils from './utils';
 
+/**
+ * Sleep for a specified period.
+ *
+ * @param wait The time in milliseconds to wait.
+ */
+async function sleep(wait: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, wait));
+}
+
 // Specify the program signature.
 commander
-  .description('Publish the JS packages and prep the Python package')
+  .description('Publish the JS packages')
   .option(
     '--skip-build',
-    'Skip the clean and build step (if there was a network error during a JS publish'
+    'Skip the build step (if there was a network error during a JS publish'
   )
+  .option('--skip-publish', 'Skip publish and only handle tags')
+  .option('--skip-tags', 'publish assets but do not handle tags')
+  .option('--yes', 'Publish without confirmation')
+  .option('--dry-run', 'Do not actually push any assets')
   .action(async (options: any) => {
-    // Make sure we are logged in.
-    if (utils.checkStatus('npm whoami') !== 0) {
-      console.error('Please run `npm login`');
+    utils.exitOnUncaughtException();
+
+    // No-op if we're in release helper dry run
+    if (process.env.RH_DRY_RUN === 'true') {
+      return;
     }
 
-    // Optionally clean and build the python packages.
-    if (!options.skipBuild) {
-      // Ensure a clean state.
-      utils.run('npm run clean:slate');
-    }
+    if (!options.skipPublish) {
+      if (!options.skipBuild) {
+        utils.run('jlpm run build:all');
+      }
 
-    // Publish JS to the appropriate tag.
-    const curr = utils.getPythonVersion();
-    if (curr.indexOf('rc') === -1 && curr.indexOf('a') === -1) {
-      utils.run('lerna publish from-package -m "Publish"');
-    } else {
-      utils.run('lerna publish from-package --npm-tag=next -m "Publish"');
+      if (!options.dryRun) {
+        // Make sure we are logged in.
+        if (utils.checkStatus('npm whoami') !== 0) {
+          console.error('Please run `npm login`');
+          process.exit(1);
+        }
+      }
+
+      // Ensure a clean git environment
+      try {
+        utils.run('git commit -am "[ci skip] bump version"');
+      } catch (e) {
+        // do nothing
+      }
+
+      // Publish JS to the appropriate tag.
+      const curr = utils.getPythonVersion();
+      let cmd = 'lerna publish from-package ';
+      if (options.dryRun) {
+        cmd += '--no-git-tag-version --no-push ';
+      }
+      if (options.yes) {
+        cmd += '  --yes ';
+      }
+
+      let tag = 'latest';
+      if (!/\d+\.\d+\.\d+$/.test(curr)) {
+        tag = 'next';
+      }
+      utils.run(`${cmd} --dist-tag=${tag} -m "Publish"`);
     }
 
     // Fix up any tagging issues.
-    const basePath = path.resolve('.');
-    const paths = utils.getLernaPaths(basePath).sort();
-    const cmds = await Promise.all(paths.map(handlePackage));
-    cmds.forEach(cmdList => {
-      cmdList.forEach(cmd => {
-        utils.run(cmd);
+    if (!options.skipTags && !options.dryRun) {
+      const basePath = path.resolve('.');
+      const paths = utils.getLernaPaths(basePath).sort();
+      const cmds = await Promise.all(paths.map(handlePackage));
+      cmds.forEach(cmdList => {
+        cmdList.forEach(cmd => {
+          if (!options.dryRun) {
+            utils.run(cmd);
+          } else {
+            throw new Error(`Tag is out of sync: ${cmd}`);
+          }
+        });
       });
+    }
+
+    // Make sure all current JS packages are published.
+    // Try and install them into a temporary local npm package.
+    console.log('Checking for published packages...');
+    const installDir = os.tmpdir();
+    utils.run('npm init -y', { cwd: installDir, stdio: 'pipe' }, true);
+    const specifiers: string[] = [];
+    utils.getCorePaths().forEach(async pkgPath => {
+      const pkgJson = path.join(pkgPath, 'package.json');
+      const pkgData = utils.readJSONFile(pkgJson);
+      specifiers.push(`${pkgData.name}@${pkgData.version}`);
     });
 
-    // Update core mode.  This cannot be done until the JS packages are
-    // released.
-    utils.run('node buildutils/lib/update-core-mode.js');
+    let attempt = 0;
+    while (attempt < 10) {
+      try {
+        utils.run(`npm install ${specifiers.join(' ')}`, { cwd: installDir });
+        break;
+      } catch (e) {
+        console.error(e);
+        console.log('Sleeping for one minute...');
+        await sleep(1 * 60 * 1000);
+        attempt += 1;
+      }
+    }
+    if (attempt == 10) {
+      console.error('Could not install packages');
+      process.exit(1);
+    }
 
-    // Make the Python release.
-    utils.run('python setup.py sdist');
-    utils.run('python setup.py bdist_wheel');
-    utils.run('python -m pip install -U twine');
-    utils.run('twine check dist/*');
-
-    const files = fs.readdirSync('./dist/');
-    const hashes = new Map<string, string>();
-    files.forEach(file => {
-      const shasum = crypto.createHash('sha256');
-      const hash = shasum.update(fs.readFileSync('./dist/' + file));
-      hashes.set(file, hash.digest('hex'));
-    });
-
-    const hashString = Array.from(hashes.entries())
-      .map(entry => `${entry[0]}: ${entry[1]}`)
-      .join('" -m "');
-
-    // Prompt the user to finalize.
-    console.log('*'.repeat(40));
-    console.log('*'.repeat(40));
-    console.log('Ready to publish!');
-    console.log('Run these command when ready:');
-    console.log(
-      `git commit -am "Publish ${curr}" -m "SHA256 hashes:" -m "${hashString}"`
-    );
-    console.log(`git tag v${curr}`);
-    console.log('twine upload dist/*');
-    console.log('git push origin <BRANCH> --tags');
+    // Emit a system beep.
+    process.stdout.write('\x07');
   });
 
 commander.parse(process.argv);

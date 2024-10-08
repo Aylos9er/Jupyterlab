@@ -1,22 +1,18 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
-
-import { IEditorServices } from '@jupyterlab/codeeditor';
-
-import { CodeMirrorEditorFactory } from './factory';
-
-import { CodeMirrorMimeTypeService } from './mimetype';
-
-export * from './mode';
-export * from './editor';
-export * from './factory';
-export * from './mimetype';
-export * from './syntaxstatus';
-
 /**
- * The default editor services.
+ * @packageDocumentation
+ * @module codemirror
  */
-export const editorServices: IEditorServices = {
-  factoryService: new CodeMirrorEditorFactory(),
-  mimeTypeService: new CodeMirrorMimeTypeService()
-};
+
+export * from './commands';
+export * from './editor';
+export * from './extension';
+export * from './extensions';
+export * from './factory';
+export * from './language';
+export * from './mimetype';
+export * from './searchprovider';
+export * from './theme';
+export * from './token';
+export * from './pythonBuiltin';

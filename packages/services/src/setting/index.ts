@@ -1,7 +1,11 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import { DataConnector, ISettingRegistry, URLExt } from '@jupyterlab/coreutils';
+import { URLExt } from '@jupyterlab/coreutils';
+
+import { ISettingRegistry } from '@jupyterlab/settingregistry';
+
+import { DataConnector } from '@jupyterlab/statedb';
 
 import { ServerConnection } from '../serverconnection';
 
@@ -23,7 +27,7 @@ export class SettingManager extends DataConnector<
   constructor(options: SettingManager.IOptions = {}) {
     super();
     this.serverSettings =
-      options.serverSettings || ServerConnection.makeSettings();
+      options.serverSettings ?? ServerConnection.makeSettings();
   }
 
   /**
@@ -39,6 +43,10 @@ export class SettingManager extends DataConnector<
    * @returns A promise that resolves if successful.
    */
   async fetch(id: string): Promise<ISettingRegistry.IPlugin> {
+    if (!id) {
+      throw new Error('Plugin `id` parameter is required for settings fetch.');
+    }
+
     const { serverSettings } = this;
     const { baseUrl, appUrl } = serverSettings;
     const { makeRequest, ResponseError } = ServerConnection;
@@ -46,12 +54,9 @@ export class SettingManager extends DataConnector<
     const url = Private.url(base, id);
     const response = await makeRequest(url, {}, serverSettings);
 
-    if (!id) {
-      throw new Error('Plugin `id` parameter is required for settings fetch.');
-    }
-
     if (response.status !== 200) {
-      throw new ResponseError(response);
+      const err = await ResponseError.create(response);
+      throw err;
     }
 
     // Assert what type the server response is returning.
@@ -63,12 +68,14 @@ export class SettingManager extends DataConnector<
    *
    * @returns A promise that resolves if successful.
    */
-  async list(): Promise<{ ids: string[]; values: ISettingRegistry.IPlugin[] }> {
+  async list(
+    query?: 'ids'
+  ): Promise<{ ids: string[]; values: ISettingRegistry.IPlugin[] }> {
     const { serverSettings } = this;
     const { baseUrl, appUrl } = serverSettings;
     const { makeRequest, ResponseError } = ServerConnection;
     const base = baseUrl + appUrl;
-    const url = Private.url(base, '');
+    const url = Private.url(base, '', query === 'ids');
     const response = await makeRequest(url, {}, serverSettings);
 
     if (response.status !== 200) {
@@ -76,13 +83,19 @@ export class SettingManager extends DataConnector<
     }
 
     const json = await response.json();
-    const values = ((json || {})['settings'] || []).map(
-      (plugin: ISettingRegistry.IPlugin) => {
-        plugin.data = { composite: {}, user: {} };
-        return plugin;
-      }
-    ) as ISettingRegistry.IPlugin[];
-    const ids = values.map(plugin => plugin.id);
+    const ids =
+      json?.['settings']?.map(
+        (plugin: ISettingRegistry.IPlugin) => plugin.id
+      ) ?? [];
+
+    let values: ISettingRegistry.IPlugin[] = [];
+    if (!query) {
+      values =
+        json?.['settings']?.map((plugin: ISettingRegistry.IPlugin) => {
+          plugin.data = { composite: {}, user: {} };
+          return plugin;
+        }) ?? [];
+    }
 
     return { ids, values };
   }
@@ -102,7 +115,8 @@ export class SettingManager extends DataConnector<
     const { makeRequest, ResponseError } = ServerConnection;
     const base = baseUrl + appUrl;
     const url = Private.url(base, id);
-    const init = { body: raw, method: 'PUT' };
+    // NOTE: 'raw' is JSON5 (not valid JSON), so we encode it as a string in a valid JSON body
+    const init = { body: JSON.stringify({ raw }), method: 'PUT' };
     const response = await makeRequest(url, init, serverSettings);
 
     if (response.status !== 204) {
@@ -143,7 +157,15 @@ namespace Private {
   /**
    * Get the url for a plugin's settings.
    */
-  export function url(base: string, id: string): string {
-    return URLExt.join(base, SERVICE_SETTINGS_URL, id);
+  export function url(base: string, id: string, idsOnly?: boolean): string {
+    const idsOnlyParam = idsOnly
+      ? URLExt.objectToQueryString({ ids_only: true })
+      : '';
+    const settingsBase = URLExt.join(base, SERVICE_SETTINGS_URL);
+    const result = URLExt.join(settingsBase, id);
+    if (!result.startsWith(settingsBase)) {
+      throw new Error('Can only be used for workspaces requests');
+    }
+    return `${result}${idsOnlyParam}`;
   }
 }

@@ -16,10 +16,25 @@
       "path": "../coreutils"
     },
     {
+      "path": "../docmanager"
+    },
+    {
+      "path": "../filebrowser"
+    },
+    {
       "path": "../mainmenu"
     },
     {
       "path": "../services"
+    },
+    {
+      "path": "../settingregistry"
+    },
+    {
+      "path": "../translation"
+    },
+    {
+      "path": "../ui-components"
     }
   ]
 }

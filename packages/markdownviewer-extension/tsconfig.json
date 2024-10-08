@@ -20,6 +20,15 @@
     },
     {
       "path": "../rendermime"
+    },
+    {
+      "path": "../settingregistry"
+    },
+    {
+      "path": "../toc"
+    },
+    {
+      "path": "../translation"
     }
   ]
 }

@@ -1,7 +1,10 @@
+.. Copyright (c) Jupyter Development Team.
+.. Distributed under the terms of the Modified BSD License.
+
 .. _file-and-output-formats:
 
 File and Output Formats
------------------------
+=======================
 
 JupyterLab provides a unified architecture for viewing and editing data
 in a wide variety of formats. This model applies whether the data is in
@@ -16,7 +19,7 @@ displayed as HTML. You can open different editors and viewers for a file
 by right-clicking on the filename in the file browser and using the
 “Open With” submenu:
 
-.. image:: images/file_formats_open_with.png
+.. image:: ../images/file-formats-open-with.png
    :align: center
    :class: jp-screenshot
 
@@ -33,7 +36,7 @@ classes for displaying rich output:
 Running this code will display the HTML in the output of a notebook or
 code console cell:
 
-.. image:: images/file_formats_html_display.png
+.. image:: ../images/file-formats-html-display.png
    :align: center
    :class: jp-screenshot
 
@@ -54,7 +57,7 @@ other file formats.
 .. _markdown:
 
 Markdown
-~~~~~~~~
+--------
 
 -  File extension: ``.md``
 -  MIME type: ``text/markdown``
@@ -78,7 +81,7 @@ animation, edits to the Markdown source are immediately reflected in the
 rendered version.
 
 Images
-~~~~~~
+------
 
 -  File extensions: ``.bmp``, ``.gif``, ``.jpeg``, ``.jpg``, ``.png``,
    ``.svg``
@@ -106,7 +109,7 @@ submenu:
 .. _csv:
 
 Delimiter-separated Values
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+--------------------------
 
 -  File extension: ``.csv``
 -  MIME type: None
@@ -154,7 +157,7 @@ Below is a table that shows the sizes of the largest test files we successfully 
 The actual maximum size of files that can be successfully loaded will vary depending on the browser version and file content.
 
 JSON
-~~~~
+----
 
 -  File extension: ``.json``
 -  MIME type: ``application/json``
@@ -183,7 +186,7 @@ browser and select the “Editor” item in the “Open With” submenu:
   </div>
 
 HTML
-~~~~
+----
 
 -  File extension: ``.html``
 -  MIME type: ``text/html``
@@ -192,7 +195,7 @@ JupyterLab supports rendering HTML in cell output and editing HTML files
 as text in the file editor.
 
 LaTeX
-~~~~~
+-----
 
 -  File extension: ``.tex``
 -  MIME type: ``text/latex``
@@ -201,7 +204,7 @@ JupyterLab supports rendering LaTeX equations in cell output and editing
 LaTeX files as text in the file editor.
 
 PDF
-~~~
+---
 
 -  File extension: ``.pdf``
 -  MIME type: ``application/pdf``
@@ -220,22 +223,22 @@ in JupyterLab, double-click on the file in the file browser:
 .. _vega-lite:
 
 Vega/Vega-Lite
-~~~~~~~~~~~~~~
+--------------
 
 Vega:
 
 -  File extensions: ``.vg``, ``.vg.json``
--  MIME type: ``application/vnd.vega.v2+json``
+-  MIME type: ``application/vnd.vega.v5+json``
 
 Vega-Lite:
 
 -  File extensions: ``.vl``, ``.vl.json``
--  MIME type: ``application/vnd.vegalite.v1+json``
+-  MIME type: ``application/vnd.vegalite.v3+json``
 
 Vega and Vega-Lite are declarative visualization grammars that enable
 visualizations to be encoded as JSON data. For more information, see the
 documentation of Vega or Vega-Lite. JupyterLab supports rendering Vega
-2.x and Vega-Lite 1.x data in files and cell output.
+5.x and Vega-Lite 3.x data in files and cell output.
 
 .. _open-vega:
 
@@ -279,42 +282,9 @@ Output support for Vega/Vega-Lite in a notebook or code console is
 provided through third-party libraries such as Altair (Python), the
 vegalite R package, or Vegas (Scala/Spark).
 
-.. image:: images/file_formats_altair.png
+.. image:: ../images/file-formats-altair.png
    :align: center
    :class: jp-screenshot
 
 A JupyterLab extension that supports Vega 3.x and Vega-Lite 2.x can be
 found `here <https://github.com/jupyterlab/jupyter-renderers>`__.
-
-Virtual DOM
-~~~~~~~~~~~
-
--  File extensions: ``.vdom``, ``.json``
--  MIME type: ``application/vdom.v1+json``
-
-Virtual DOM libraries such as `react.js <https://reactjs.org/>`__ have
-greatly improved the experience of rendering interactive content in
-HTML. The nteract project, which collaborates closely with Project
-Jupyter, has created a `declarative JSON
-format <https://github.com/nteract/vdom>`__ for virtual DOM data.
-JupyterLab can render this data using react.js. This works for both VDOM
-files with the ``.vdom`` extension, or within notebook output.
-
-.. _edit-vdom:
-
-Here is an example of a ``.vdom`` file being edited and rendered
-interactively:
-
-.. raw:: html
-
-  <div class="jp-youtube-video">
-    <iframe src="https://www.youtube-nocookie.com/embed/fObR8xeKCJU?rel=0&amp;showinfo=0" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
-  </div>
-
-The `nteract/vdom <https://github.com/nteract/vdom>`__ library provides
-a Python API for creating VDOM output that is rendered in nteract and
-JupyterLab:
-
-.. image:: images/file_formats_nteract_vdom.png
-   :align: center
-   :class: jp-screenshot

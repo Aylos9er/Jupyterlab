@@ -1,4 +1,4 @@
-/*-----------------------------------------------------------------------------
+/* -----------------------------------------------------------------------------
 | Copyright (c) Jupyter Development Team.
 | Distributed under the terms of the Modified BSD License.
 |----------------------------------------------------------------------------*/
@@ -9,11 +9,10 @@
  * Notebook widgets.
  */
 
-import { each, IterableOrArrayLike } from '@phosphor/algorithm';
 import { ICodeCellModel } from './model';
 import { Cell } from './widget';
-import { h, VirtualDOM } from '@phosphor/virtualdom';
-import { nbformat } from '@jupyterlab/coreutils';
+import { h, VirtualDOM } from '@lumino/virtualdom';
+import * as nbformat from '@jupyterlab/nbformat';
 
 /**
  * Constants for drag
@@ -66,18 +65,19 @@ export namespace CellDragUtils {
    */
   export function findCell(
     node: HTMLElement,
-    cells: IterableOrArrayLike<Cell>,
+    cells: Iterable<Cell>,
     isCellNode: (node: HTMLElement) => boolean
   ): number {
-    let cellIndex: number = -1;
+    let cellIndex = -1;
     while (node && node.parentElement) {
       if (isCellNode(node)) {
-        each(cells, (cell, index) => {
+        let index = -1;
+        for (const cell of cells) {
           if (cell.node === node) {
-            cellIndex = index;
-            return false;
+            cellIndex = ++index;
+            break;
           }
-        });
+        }
         break;
       }
       node = node.parentElement;
@@ -95,11 +95,11 @@ export namespace CellDragUtils {
     cell: Cell,
     target: HTMLElement
   ): ICellTargetArea {
-    let targetArea: ICellTargetArea = null;
+    let targetArea: ICellTargetArea;
     if (cell) {
-      if (cell.editorWidget.node.contains(target)) {
+      if (cell.editorWidget?.node.contains(target)) {
         targetArea = 'input';
-      } else if (cell.promptNode.contains(target)) {
+      } else if (cell.promptNode?.contains(target)) {
         targetArea = 'prompt';
       } else {
         targetArea = 'cell';
@@ -125,8 +125,8 @@ export namespace CellDragUtils {
     nextX: number,
     nextY: number
   ): boolean {
-    let dx = Math.abs(nextX - prevX);
-    let dy = Math.abs(nextY - prevY);
+    const dx = Math.abs(nextX - prevX);
+    const dy = Math.abs(nextY - prevY);
     return dx >= DRAG_THRESHOLD || dy >= DRAG_THRESHOLD;
   }
 
@@ -143,7 +143,8 @@ export namespace CellDragUtils {
     const count = selectedCells.length;
     let promptNumber: string;
     if (activeCell.model.type === 'code') {
-      let executionCount = (activeCell.model as ICodeCellModel).executionCount;
+      const executionCount = (activeCell.model as ICodeCellModel)
+        .executionCount;
       promptNumber = ' ';
       if (executionCount) {
         promptNumber = executionCount.toString();
@@ -152,7 +153,10 @@ export namespace CellDragUtils {
       promptNumber = '';
     }
 
-    const cellContent = activeCell.model.value.text.split('\n')[0].slice(0, 26);
+    const cellContent = activeCell.model.sharedModel
+      .getSource()
+      .split('\n')[0]
+      .slice(0, 26);
     if (count > 1) {
       if (promptNumber !== '') {
         return VirtualDOM.realize(

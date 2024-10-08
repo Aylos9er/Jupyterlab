@@ -1,4 +1,4 @@
-/*-----------------------------------------------------------------------------
+/* -----------------------------------------------------------------------------
 | Copyright (c) Jupyter Development Team.
 | Distributed under the terms of the Modified BSD License.
 |----------------------------------------------------------------------------*/
@@ -13,7 +13,8 @@ const inline = '$'; // the inline math delimiter
 
 // MATHSPLIT contains the pattern for math delimiters and special symbols
 // needed for searching for math in the text input.
-const MATHSPLIT = /(\$\$?|\\(?:begin|end)\{[a-z]*\*?\}|\\[{}$]|[{}]|(?:\n\s*)+|@@\d+@@|\\\\(?:\(|\)|\[|\]))/i;
+const MATHSPLIT =
+  /(\$\$?|\\(?:begin|end)\{[a-z]*\*?\}|\\[{}$]|[{}]|(?:\n\s*)+|@@\d+@@|\\\\(?:\(|\)|\[|\]))/i;
 
 /**
  *  Break up the text into its component parts and search
@@ -23,7 +24,7 @@ const MATHSPLIT = /(\$\$?|\\(?:begin|end)\{[a-z]*\*?\}|\\[{}$]|[{}]|(?:\n\s*)+|@
  *    (which will be a paragraph).
  */
 export function removeMath(text: string): { text: string; math: string[] } {
-  let math: string[] = []; // stores math strings for later
+  const math: string[] = []; // stores math strings for later
   let start: number | null = null;
   let end: string | null = null;
   let last: number | null = null;
@@ -35,10 +36,17 @@ export function removeMath(text: string): { text: string; math: string[] } {
   // we still have to consider them at this point; the following issue has happened several times:
   //
   //     `$foo` and `$bar` are variables.  -->  <code>$foo ` and `$bar</code> are variables.
-  let hasCodeSpans = /`/.test(text);
+  const hasCodeSpans = text.includes('`') || text.includes('~~~');
   if (hasCodeSpans) {
     text = text
       .replace(/~/g, '~T')
+      // note: the `fence` (three or more consecutive tildes or backticks)
+      // can be followed by an `info string` but this cannot include backticks,
+      // see specification: https://spec.commonmark.org/0.30/#info-string
+      .replace(
+        /^(?<fence>`{3,}|(~T){3,})[^`\n]*\n([\s\S]*?)^\k<fence>`*$/gm,
+        wholematch => wholematch.replace(/\$/g, '~D')
+      )
       .replace(/(^|[^\\])(`+)([^\n]*?[^`\n])\2(?!`)/gm, wholematch =>
         wholematch.replace(/\$/g, '~D')
       );
@@ -56,7 +64,7 @@ export function removeMath(text: string): { text: string; math: string[] } {
   let blocks = text.replace(/\r\n?/g, '\n').split(MATHSPLIT);
 
   for (let i = 1, m = blocks.length; i < m; i += 2) {
-    let block = blocks[i];
+    const block = blocks[i];
     if (block.charAt(0) === '@') {
       //
       //  Things that look like our math markers will get
@@ -132,7 +140,7 @@ export function replaceMath(text: string, math: string[]): string {
    * The math delimiters "\\(", "\\[", "\\)" and "\\]" are replaced
    * removing one backslash in order to be interpreted correctly by MathJax.
    */
-  let process = (match: string, n: number): string => {
+  const process = (match: string, n: number): string => {
     let group = math[n];
     if (
       group.substr(0, 3) === '\\\\(' &&

@@ -1,29 +1,27 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import { nbformat, IChangedArgs } from '@jupyterlab/coreutils';
-
-import { OutputArea, IOutputPrompt } from '@jupyterlab/outputarea';
-
+import { IChangedArgs } from '@jupyterlab/coreutils';
+import * as nbformat from '@jupyterlab/nbformat';
+import { IOutputPrompt, OutputArea } from '@jupyterlab/outputarea';
 import { IRenderMimeRegistry } from '@jupyterlab/rendermime';
-
 import { Kernel, KernelMessage } from '@jupyterlab/services';
-
-import { Message } from '@phosphor/messaging';
-
-import { ISignal, Signal } from '@phosphor/signaling';
-
-import { Widget, Panel, PanelLayout, StackedPanel } from '@phosphor/widgets';
-
-import { LogOutputModel, LoggerOutputAreaModel } from './logger';
-
 import {
-  ILogger,
+  ITranslator,
+  nullTranslator,
+  TranslationBundle
+} from '@jupyterlab/translation';
+import { Message } from '@lumino/messaging';
+import { ISignal, Signal } from '@lumino/signaling';
+import { Panel, PanelLayout, StackedPanel, Widget } from '@lumino/widgets';
+import { LoggerOutputAreaModel, LogOutputModel } from './logger';
+import {
   IContentChange,
+  ILogger,
   ILoggerRegistry,
   ILoggerRegistryChange,
-  LogLevel,
-  IStateChange
+  IStateChange,
+  LogLevel
 } from './tokens';
 
 function toTitleCase(value: string) {
@@ -87,10 +85,6 @@ class LogConsoleOutputPrompt extends Widget implements IOutputPrompt {
  */
 class LogConsoleOutputArea extends OutputArea {
   /**
-   * The rendermime instance used by the widget.
-   */
-  rendermime: IRenderMimeRegistry;
-  /**
    * Output area model used by the widget.
    */
   readonly model: LoggerOutputAreaModel;
@@ -106,7 +100,7 @@ class LogConsoleOutputArea extends OutputArea {
     }
 
     // first widget in panel is prompt of type LoggerOutputPrompt
-    let prompt = panel.widgets[0] as LogConsoleOutputPrompt;
+    const prompt = panel.widgets[0] as LogConsoleOutputPrompt;
     prompt.timestamp = model.timestamp;
     prompt.level = model.level;
     return panel;
@@ -165,7 +159,7 @@ export class ScrollingWidget<T extends Widget> extends Widget {
     return this._content;
   }
 
-  protected onAfterAttach(msg: Message) {
+  protected onAfterAttach(msg: Message): void {
     super.onAfterAttach(msg);
     // defer so content gets a chance to attach first
     requestAnimationFrame(() => {
@@ -185,13 +179,13 @@ export class ScrollingWidget<T extends Widget> extends Widget {
     }
   }
 
-  protected onBeforeDetach(msg: Message) {
+  protected onBeforeDetach(msg: Message): void {
     if (this._observer) {
       this._observer.disconnect();
     }
   }
 
-  protected onAfterShow(msg: Message) {
+  protected onAfterShow(msg: Message): void {
     if (this._tracking) {
       this._sentinel.scrollIntoView();
     }
@@ -215,7 +209,7 @@ export class ScrollingWidget<T extends Widget> extends Widget {
   }
 
   private _content: T;
-  private _observer: IntersectionObserver = null;
+  private _observer: IntersectionObserver | null = null;
   private _scrollHeight: number;
   private _sentinel: HTMLDivElement;
   private _tracking: boolean;
@@ -238,9 +232,10 @@ export class LogConsolePanel extends StackedPanel {
    * @param loggerRegistry - The logger registry that provides
    * logs to be displayed.
    */
-  constructor(loggerRegistry: ILoggerRegistry) {
+  constructor(loggerRegistry: ILoggerRegistry, translator?: ITranslator) {
     super();
-
+    this.translator = translator || nullTranslator;
+    this._trans = this.translator.load('jupyterlab');
     this._loggerRegistry = loggerRegistry;
     this.addClass('jp-LogConsolePanel');
 
@@ -297,13 +292,18 @@ export class LogConsolePanel extends StackedPanel {
    */
   get sourceVersion(): number | null {
     const source = this.source;
-    return source && this._loggerRegistry.getLogger(source).version;
+    return source !== null
+      ? this._loggerRegistry.getLogger(source).version
+      : null;
   }
 
   /**
    * Signal for source changes
    */
-  get sourceChanged(): ISignal<this, IChangedArgs<string | null, 'source'>> {
+  get sourceChanged(): ISignal<
+    this,
+    IChangedArgs<string | null, string | null, 'source'>
+  > {
     return this._sourceChanged;
   }
 
@@ -321,7 +321,7 @@ export class LogConsolePanel extends StackedPanel {
     this._handlePlaceholder();
   }
 
-  protected onAfterShow(msg: Message) {
+  protected onAfterShow(msg: Message): void {
     super.onAfterShow(msg);
     if (this.source !== null) {
       this._sourceDisplayed.emit({
@@ -333,7 +333,7 @@ export class LogConsolePanel extends StackedPanel {
 
   private _bindLoggerSignals() {
     const loggers = this._loggerRegistry.getLoggers();
-    for (let logger of loggers) {
+    for (const logger of loggers) {
       if (this._loggersWatched.has(logger.source)) {
         continue;
       }
@@ -350,7 +350,12 @@ export class LogConsolePanel extends StackedPanel {
         const viewId = `source:${sender.source}`;
         const outputArea = this._outputAreas.get(viewId);
         if (outputArea) {
-          outputArea.rendermime = change.newValue;
+          if (change.newValue) {
+            // cast away readonly
+            (outputArea.rendermime as IRenderMimeRegistry) = change.newValue;
+          } else {
+            outputArea.dispose();
+          }
         }
       }, this);
 
@@ -366,7 +371,7 @@ export class LogConsolePanel extends StackedPanel {
       (outputArea: LogConsoleOutputArea, name: string) => {
         // Show/hide the output area parents, the scrolling windows.
         if (outputArea.id === viewId) {
-          outputArea.parent.show();
+          outputArea.parent?.show();
           if (outputArea.isVisible) {
             this._sourceDisplayed.emit({
               source: this.source,
@@ -374,22 +379,27 @@ export class LogConsolePanel extends StackedPanel {
             });
           }
         } else {
-          outputArea.parent.hide();
+          outputArea.parent?.hide();
         }
       }
     );
 
-    const title = source === null ? 'Log Console' : `Log: ${source}`;
+    const title =
+      source === null
+        ? this._trans.__('Log Console')
+        : this._trans.__('Log: %1', source);
     this.title.label = title;
     this.title.caption = title;
   }
 
   private _handlePlaceholder() {
     if (this.source === null) {
-      this._placeholder.node.textContent = 'No source selected.';
+      this._placeholder.node.textContent = this._trans.__(
+        'No source selected.'
+      );
       this._placeholder.show();
     } else if (this._loggerRegistry.getLogger(this.source).length === 0) {
-      this._placeholder.node.textContent = 'No log messages.';
+      this._placeholder.node.textContent = this._trans.__('No log messages.');
       this._placeholder.show();
     } else {
       this._placeholder.hide();
@@ -401,7 +411,7 @@ export class LogConsolePanel extends StackedPanel {
     const loggerIds = new Set<string>();
     const loggers = this._loggerRegistry.getLoggers();
 
-    for (let logger of loggers) {
+    for (const logger of loggers) {
       const source = logger.source;
       const viewId = `source:${source}`;
       loggerIds.add(viewId);
@@ -409,7 +419,7 @@ export class LogConsolePanel extends StackedPanel {
       // add view for logger if not exist
       if (!this._outputAreas.has(viewId)) {
         const outputArea = new LogConsoleOutputArea({
-          rendermime: logger.rendermime,
+          rendermime: logger.rendermime!,
           contentFactory: new LogConsoleContentFactory(),
           model: logger.outputAreaModel
         });
@@ -417,7 +427,7 @@ export class LogConsolePanel extends StackedPanel {
 
         // Attach the output area so it is visible, so the accounting
         // functions below record the outputs actually displayed.
-        let w = new ScrollingWidget({
+        const w = new ScrollingWidget({
           content: outputArea
         });
         this.addWidget(w);
@@ -450,21 +460,23 @@ export class LogConsolePanel extends StackedPanel {
     // remove output areas that do not have corresponding loggers anymore
     const viewIds = this._outputAreas.keys();
 
-    for (let viewId of viewIds) {
+    for (const viewId of viewIds) {
       if (!loggerIds.has(viewId)) {
         const outputArea = this._outputAreas.get(viewId);
-        outputArea.dispose();
+        outputArea?.dispose();
         this._outputAreas.delete(viewId);
       }
     }
   }
 
+  protected translator: ITranslator;
+  private _trans: TranslationBundle;
   private _loggerRegistry: ILoggerRegistry;
   private _outputAreas = new Map<string, LogConsoleOutputArea>();
   private _source: string | null = null;
   private _sourceChanged = new Signal<
     this,
-    IChangedArgs<string | null, 'source'>
+    IChangedArgs<string | null, string | null, 'source'>
   >(this);
   private _sourceDisplayed = new Signal<this, ISourceDisplayed>(this);
   private _placeholder: Widget;
@@ -472,6 +484,6 @@ export class LogConsolePanel extends StackedPanel {
 }
 
 export interface ISourceDisplayed {
-  source: string;
-  version: number;
+  source: string | null;
+  version: number | null;
 }

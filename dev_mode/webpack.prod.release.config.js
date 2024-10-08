@@ -1,5 +1,10 @@
-var merge = require('webpack-merge');
-var config = require('./webpack.prod.minimize.config');
+/*
+ * Copyright (c) Jupyter Development Team.
+ * Distributed under the terms of the Modified BSD License.
+ */
+
+const merge = require('webpack-merge').default;
+const config = require('./webpack.prod.minimize.config');
 
 config[0] = merge(config[0], {
   // Turn off source maps

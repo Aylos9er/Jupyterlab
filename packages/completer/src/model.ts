@@ -1,21 +1,20 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import {
-  IIterator,
-  IterableOrArrayLike,
-  iter,
-  map,
-  toArray
-} from '@phosphor/algorithm';
-
-import { JSONExt } from '@phosphor/coreutils';
-
-import { StringExt } from '@phosphor/algorithm';
-
-import { ISignal, Signal } from '@phosphor/signaling';
-
+import { StringExt } from '@lumino/algorithm';
+import { JSONExt, ReadonlyPartialJSONArray } from '@lumino/coreutils';
+import { ISignal, Signal } from '@lumino/signaling';
+import { CompletionHandler } from './handler';
 import { Completer } from './widget';
+
+/**
+ * Escape HTML by native means of the browser.
+ */
+function escapeHTML(text: string) {
+  const node = document.createElement('span');
+  node.textContent = text;
+  return node.innerHTML;
+}
 
 /**
  * An implementation of a completer model.
@@ -29,13 +28,20 @@ export class CompleterModel implements Completer.IModel {
   }
 
   /**
+   * A signal emitted when query string changes (at invocation, or as user types).
+   */
+  get queryChanged(): ISignal<this, Completer.IQueryChange> {
+    return this._queryChanged;
+  }
+
+  /**
    * The original completion request details.
    */
   get original(): Completer.ITextState | null {
     return this._original;
   }
   set original(newValue: Completer.ITextState | null) {
-    let unchanged =
+    const unchanged =
       this._original === newValue ||
       (this._original &&
         newValue &&
@@ -101,13 +107,16 @@ export class CompleterModel implements Completer.IModel {
       return;
     }
 
-    const { start, end } = this._cursor;
+    const { start, end } = cursor;
     // Clip the front of the current line.
     let query = current.text.substring(start);
     // Clip the back of the current line by calculating the end of the original.
     const ending = original.text.substring(end);
     query = query.substring(0, query.lastIndexOf(ending));
     this._query = query;
+    this.processedItemsCache = null;
+    this._processedToOriginalItem = null;
+    this._queryChanged.emit({ newValue: this._query, origin: 'editorUpdate' });
     this._stateChanged.emit(undefined);
   }
 
@@ -134,6 +143,9 @@ export class CompleterModel implements Completer.IModel {
   }
   set query(newValue: string) {
     this._query = newValue;
+    this.processedItemsCache = null;
+    this._processedToOriginalItem = null;
+    this._queryChanged.emit({ newValue: this._query, origin: 'setter' });
   }
 
   /**
@@ -170,16 +182,48 @@ export class CompleterModel implements Completer.IModel {
    *
    * #### Notes
    * This is a read-only property.
+   * When overriding it is recommended to cache results in `processedItemsCache`
+   * property which will be automatically nullified when needed.
    */
-  items(): IIterator<Completer.IItem> {
-    return this._filter();
+  completionItems(): CompletionHandler.ICompletionItems {
+    if (!this.processedItemsCache) {
+      let query = this._query;
+      if (query) {
+        const markedItems = this._markup(query);
+        this.processedItemsCache = markedItems.map(it => it.processedItem);
+        this._processedToOriginalItem = new WeakMap(
+          markedItems.map(it => [it.processedItem, it.originalItem])
+        );
+      } else {
+        this.processedItemsCache = this._completionItems.map(item => {
+          return this._escapeItemLabel(item);
+        });
+        this._processedToOriginalItem = null;
+      }
+    }
+    return this.processedItemsCache;
   }
 
   /**
-   * The unfiltered list of all available options in a completer menu.
+   * Set the list of visible items in the completer menu, and append any
+   * new types to KNOWN_TYPES.
    */
-  options(): IIterator<string> {
-    return iter(this._options);
+  setCompletionItems(newValue: CompletionHandler.ICompletionItems): void {
+    if (
+      JSONExt.deepEqual(
+        newValue as unknown as ReadonlyPartialJSONArray,
+        this._completionItems as unknown as ReadonlyPartialJSONArray
+      )
+    ) {
+      return;
+    }
+    this._completionItems = newValue;
+    this._orderedTypes = Private.findOrderedCompletionItemTypes(
+      this._completionItems
+    );
+    this.processedItemsCache = null;
+    this._processedToOriginalItem = null;
+    this._stateChanged.emit(undefined);
   }
 
   /**
@@ -205,40 +249,12 @@ export class CompleterModel implements Completer.IModel {
    * ```
    * ['function', 'instance', 'class', 'module', 'keyword']
    * ```
-   * and then has any remaining types listed alphebetically. This will give
+   * and then has any remaining types listed alphabetically. This will give
    * reliable visual encoding for these known types, but allow kernels to
    * provide new types.
    */
   orderedTypes(): string[] {
     return this._orderedTypes;
-  }
-
-  /**
-   * Set the available options in the completer menu.
-   */
-  setOptions(
-    newValue: IterableOrArrayLike<string>,
-    typeMap?: Completer.TypeMap
-  ) {
-    const values = toArray(newValue || []);
-    const types = typeMap || {};
-
-    if (
-      JSONExt.deepEqual(values, this._options) &&
-      JSONExt.deepEqual(types, this._typeMap)
-    ) {
-      return;
-    }
-    if (values.length) {
-      this._options = values;
-      this._typeMap = types;
-      this._orderedTypes = Private.findOrderedTypes(types);
-    } else {
-      this._options = [];
-      this._typeMap = {};
-      this._orderedTypes = [];
-    }
-    this._stateChanged.emit(undefined);
   }
 
   /**
@@ -295,7 +311,6 @@ export class CompleterModel implements Completer.IModel {
    */
   handleTextChange(change: Completer.ITextState): void {
     const original = this._original;
-
     // If there is no active completion, return.
     if (!original) {
       return;
@@ -325,15 +340,15 @@ export class CompleterModel implements Completer.IModel {
   createPatch(patch: string): Completer.IPatch | undefined {
     const original = this._original;
     const cursor = this._cursor;
-
-    if (!original || !cursor) {
+    const current = this._current;
+    if (!original || !cursor || !current) {
       return undefined;
     }
 
     let { start, end } = cursor;
     // Also include any filtering/additional-typing that has occurred
     // since the completion request in the patched length.
-    end = end + (this.current.text.length - this.original.text.length);
+    end = end + (current.text.length - original.text.length);
 
     return { start, end, value: patch };
   }
@@ -343,7 +358,7 @@ export class CompleterModel implements Completer.IModel {
    *
    * @param hard - Reset even if a subset match is in progress.
    */
-  reset(hard = false) {
+  reset(hard = false): void {
     // When the completer detects a common subset prefix for all options,
     // it updates the model and sets the model source to that value, triggering
     // a reset. Unless explicitly a hard reset, this should be ignored.
@@ -355,56 +370,211 @@ export class CompleterModel implements Completer.IModel {
   }
 
   /**
-   * Apply the query to the complete options list to return the matching subset.
+   * Check if CompletionItem matches against query.
+   * Highlight matching prefix by adding <mark> tags.
    */
-  private _filter(): IIterator<Completer.IItem> {
-    let options = this._options || [];
-    let query = this._query;
-    if (!query) {
-      return map(options, option => ({ raw: option, text: option }));
-    }
-    let results: Private.IMatch[] = [];
-    for (let option of options) {
-      let match = StringExt.matchSumOfSquares(option, query);
+  private _markup(query: string): {
+    processedItem: CompletionHandler.ICompletionItem;
+    originalItem: CompletionHandler.ICompletionItem;
+  }[] {
+    const items = this._completionItems;
+    let results: Private.ICompletionMatch[] = [];
+    for (const originalItem of items) {
+      // See if label matches query string
+      // With ICompletionItems, the label may include parameters,
+      // so we exclude them from the matcher.
+      // e.g. Given label `foo(b, a, r)` and query `bar`,
+      // don't count parameters, `b`, `a`, and `r` as matches.
+      const index = originalItem.label.indexOf('(');
+      const text =
+        index > -1
+          ? originalItem.label.substring(0, index)
+          : originalItem.label;
+      const match = StringExt.matchSumOfSquares(escapeHTML(text), query);
+      // Filter non-matching items.
       if (match) {
-        let marked = StringExt.highlight(option, match.indices, Private.mark);
+        // Highlight label text if there's a match
+        let marked = StringExt.highlight(
+          escapeHTML(originalItem.label),
+          match.indices,
+          Private.mark
+        );
+        // Use `Object.assign` to evaluate getters.
+        const highlightedItem = Object.assign({}, originalItem);
+        highlightedItem.label = marked.join('');
+        highlightedItem.insertText =
+          originalItem.insertText ?? originalItem.label;
         results.push({
-          raw: option,
+          item: highlightedItem,
           score: match.score,
-          text: marked.join('')
+          originalItem
         });
       }
     }
-    return map(results.sort(Private.scoreCmp), result => ({
-      text: result.text,
-      raw: result.raw
+    results.sort(Private.scoreCmp);
+
+    // Extract only the item (dropping the extra score attribute to not leak
+    // implementation details to JavaScript callers.
+    return results.map(match => ({
+      processedItem: match.item,
+      originalItem: match.originalItem
     }));
+  }
+
+  /**
+   * Lazy load missing data of an item.
+   * @param indexOrValue - the item or its index
+   * @remarks
+   * Resolving item by index will be deprecated in
+   * the JupyterLab 5.0 and removed in JupyterLab 6.0.
+   *
+   * @return Return `undefined` if the completion item with `activeIndex` index can not be found.
+   *  Return a promise of `null` if another `resolveItem` is called. Otherwise return the
+   * promise of resolved completion item.
+   */
+  resolveItem(
+    indexOrValue: number | CompletionHandler.ICompletionItem
+  ): Promise<CompletionHandler.ICompletionItem | null> | undefined {
+    let processedItem: CompletionHandler.ICompletionItem | undefined;
+
+    if (typeof indexOrValue === 'number') {
+      const completionItems = this.completionItems();
+      if (!completionItems || !completionItems[indexOrValue]) {
+        return undefined;
+      }
+      processedItem = completionItems[indexOrValue];
+    } else {
+      processedItem = indexOrValue;
+    }
+    if (!processedItem) {
+      return undefined;
+    }
+
+    let originalItem: CompletionHandler.ICompletionItem | undefined;
+    if (this._processedToOriginalItem) {
+      originalItem = this._processedToOriginalItem.get(processedItem);
+    } else {
+      originalItem = processedItem;
+    }
+    if (!originalItem) {
+      return undefined;
+    }
+    return this._resolveItemByValue(originalItem);
+  }
+
+  /**
+   * Lazy load missing data of a completion item.
+   *
+   * @param  completionItem - the item to be resolved
+   * @return See `resolveItem` method
+   */
+  private _resolveItemByValue(
+    completionItem: CompletionHandler.ICompletionItem
+  ): Promise<CompletionHandler.ICompletionItem | null> {
+    const current = ++this._resolvingItem;
+    let resolvedItem: Promise<CompletionHandler.ICompletionItem>;
+    if (completionItem.resolve) {
+      let patch: Completer.IPatch | undefined;
+      if (completionItem.insertText) {
+        patch = this.createPatch(completionItem.insertText);
+      }
+      resolvedItem = completionItem.resolve(patch);
+    } else {
+      resolvedItem = Promise.resolve(completionItem);
+    }
+    return resolvedItem
+      .then(activeItem => {
+        // Escape the label it in place
+        this._escapeItemLabel(activeItem, true);
+        (
+          Object.keys(activeItem) as Array<
+            keyof CompletionHandler.ICompletionItem
+          >
+        ).forEach(
+          <Key extends keyof CompletionHandler.ICompletionItem>(key: Key) => {
+            completionItem[key] = activeItem[key];
+          }
+        );
+        completionItem.resolve = undefined;
+        if (current !== this._resolvingItem) {
+          return Promise.resolve(null);
+        }
+        return activeItem;
+      })
+      .catch(e => {
+        console.error(e);
+        // Failed to resolve missing data, return the original item.
+        return Promise.resolve(completionItem);
+      });
+  }
+
+  /**
+   * Escape item label, storing the original label and adding `insertText` if needed.
+   * If escaping changes label creates a new item unless `inplace` is true.
+   */
+  private _escapeItemLabel(
+    item: CompletionHandler.ICompletionItem,
+    inplace: boolean = false
+  ): CompletionHandler.ICompletionItem {
+    const escapedLabel = escapeHTML(item.label);
+    // If there was no insert text, use the original (unescaped) label.
+    if (escapedLabel !== item.label) {
+      const newItem = inplace ? item : Object.assign({}, item);
+      newItem.insertText = item.insertText ?? item.label;
+      newItem.label = escapedLabel;
+      return newItem;
+    }
+    return item;
   }
 
   /**
    * Reset the state of the model.
    */
   private _reset(): void {
+    const hadQuery = this._query;
     this._current = null;
     this._cursor = null;
-    this._options = [];
+    this._completionItems = [];
     this._original = null;
     this._query = '';
+    this.processedItemsCache = null;
+    this._processedToOriginalItem = null;
     this._subsetMatch = false;
     this._typeMap = {};
     this._orderedTypes = [];
+    if (hadQuery) {
+      this._queryChanged.emit({ newValue: this._query, origin: 'reset' });
+    }
   }
 
+  protected processedItemsCache: CompletionHandler.ICompletionItems | null =
+    null;
   private _current: Completer.ITextState | null = null;
   private _cursor: Completer.ICursorSpan | null = null;
   private _isDisposed = false;
-  private _options: string[] = [];
+  private _completionItems: CompletionHandler.ICompletionItems = [];
   private _original: Completer.ITextState | null = null;
   private _query = '';
   private _subsetMatch = false;
   private _typeMap: Completer.TypeMap = {};
   private _orderedTypes: string[] = [];
   private _stateChanged = new Signal<this, void>(this);
+  private _queryChanged = new Signal<this, Completer.IQueryChange>(this);
+
+  /**
+   * The weak map between a processed completion item with the original item.
+   * It's used to keep track of original completion item in case of displaying
+   * the completer with query.
+   */
+  private _processedToOriginalItem: WeakMap<
+    CompletionHandler.ICompletionItem,
+    CompletionHandler.ICompletionItem
+  > | null = null;
+
+  /**
+   * A counter to cancel ongoing `resolveItem` call.
+   */
+  private _resolvingItem = 0;
 }
 
 /**
@@ -419,13 +589,10 @@ namespace Private {
   /**
    * The map of known type annotations of completer matches.
    */
-  const KNOWN_MAP = KNOWN_TYPES.reduce(
-    (acc, type) => {
-      acc[type] = null;
-      return acc;
-    },
-    {} as Completer.TypeMap
-  );
+  const KNOWN_MAP = KNOWN_TYPES.reduce((acc, type) => {
+    acc[type] = null;
+    return acc;
+  }, {} as Completer.TypeMap);
 
   /**
    * A filtered completion menu matching result.
@@ -457,18 +624,68 @@ namespace Private {
   }
 
   /**
+   * A filtered completion matching result.
+   */
+  export interface ICompletionMatch {
+    /**
+     * The completion item data.
+     */
+    item: CompletionHandler.ICompletionItem;
+    /**
+     * A score which indicates the strength of the match.
+     *
+     * A lower score is better. Zero is the best possible score.
+     */
+    score: number;
+
+    /**
+     * The original completion item data.
+     */
+    originalItem: CompletionHandler.ICompletionItem;
+  }
+
+  /**
    * A sort comparison function for item match scores.
    *
    * #### Notes
    * This orders the items first based on score (lower is better), then
    * by locale order of the item text.
    */
-  export function scoreCmp(a: IMatch, b: IMatch): number {
-    let delta = a.score - b.score;
+  export function scoreCmp(a: ICompletionMatch, b: ICompletionMatch): number {
+    const delta = a.score - b.score;
     if (delta !== 0) {
       return delta;
     }
-    return a.raw.localeCompare(b.raw);
+    return a.item.insertText?.localeCompare(b.item.insertText ?? '') ?? 0;
+  }
+
+  /**
+   * Compute a reliably ordered list of types for ICompletionItems.
+   *
+   * #### Notes
+   * The resulting list always begins with the known types:
+   * ```
+   * ['function', 'instance', 'class', 'module', 'keyword']
+   * ```
+   * followed by other types in alphabetical order.
+   *
+   */
+  export function findOrderedCompletionItemTypes(
+    items: CompletionHandler.ICompletionItems
+  ): string[] {
+    const newTypeSet = new Set<string>();
+    items.forEach(item => {
+      if (
+        item.type &&
+        !KNOWN_TYPES.includes(item.type) &&
+        !newTypeSet.has(item.type!)
+      ) {
+        newTypeSet.add(item.type!);
+      }
+    });
+    const newTypes = Array.from(newTypeSet);
+    newTypes.sort((a, b) => a.localeCompare(b));
+    return KNOWN_TYPES.concat(newTypes);
   }
 
   /**
@@ -484,7 +701,10 @@ namespace Private {
   export function findOrderedTypes(typeMap: Completer.TypeMap): string[] {
     const filtered = Object.keys(typeMap)
       .map(key => typeMap[key])
-      .filter(value => value && !(value in KNOWN_MAP))
+      .filter(
+        (value: string | null): value is string =>
+          !!value && !(value in KNOWN_MAP)
+      )
       .sort((a, b) => a.localeCompare(b));
 
     return KNOWN_TYPES.concat(filtered);

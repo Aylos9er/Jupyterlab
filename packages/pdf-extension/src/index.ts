@@ -1,13 +1,14 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
+/**
+ * @packageDocumentation
+ * @module pdf-extension
+ */
 
 import { IRenderMime } from '@jupyterlab/rendermime-interfaces';
-
-import { PromiseDelegate } from '@phosphor/coreutils';
-
-import { DisposableDelegate } from '@phosphor/disposable';
-
-import { Widget } from '@phosphor/widgets';
+import { PromiseDelegate } from '@lumino/coreutils';
+import { DisposableDelegate } from '@lumino/disposable';
+import { Widget } from '@lumino/widgets';
 
 /**
  * The MIME type for PDF.
@@ -24,14 +25,20 @@ export class RenderedPDF extends Widget implements IRenderMime.IRenderer {
     // We put the object in an iframe, which seems to have a better chance
     // of retaining its scroll position upon tab focusing, moving around etc.
     const iframe = document.createElement('iframe');
+    // Sets iframe loading to lazy
+    iframe.setAttribute('loading', 'lazy');
     this.node.appendChild(iframe);
     // The iframe content window is not available until the onload event.
     iframe.onload = () => {
-      const body = iframe.contentWindow.document.createElement('body');
+      const body = iframe.contentWindow!.document.createElement('body');
       body.style.margin = '0px';
-      iframe.contentWindow.document.body = body;
-      this._object = iframe.contentWindow.document.createElement('object');
-      this._object.type = MIME_TYPE;
+      iframe.contentWindow!.document.body = body;
+      this._object = iframe.contentWindow!.document.createElement('object');
+      // work around for https://discussions.apple.com/thread/252247740
+      // Detect if running on Desktop Safari
+      if (!(window as any).safari) {
+        this._object.type = MIME_TYPE;
+      }
       this._object.width = '100%';
       this._object.height = '100%';
       body.appendChild(this._object);
@@ -44,7 +51,7 @@ export class RenderedPDF extends Widget implements IRenderMime.IRenderer {
    */
   async renderModel(model: IRenderMime.IMimeModel): Promise<void> {
     await this._ready.promise;
-    let data = model.data[MIME_TYPE] as string;
+    const data = model.data[MIME_TYPE] as string | undefined;
     if (
       !data ||
       (data.length === this._base64.length && data === this._base64)
@@ -60,7 +67,7 @@ export class RenderedPDF extends Widget implements IRenderMime.IRenderer {
       // upon unhiding a PDF. But triggering a refresh of the URL makes it
       // find it again. No idea what the reason for this is.
       if (Private.IS_FIREFOX) {
-        this._object.data = this._object.data;
+        this._object.data = this._object.data; // eslint-disable-line
       }
       return Promise.resolve(void 0);
     }
@@ -103,7 +110,7 @@ export class RenderedPDF extends Widget implements IRenderMime.IRenderer {
   /**
    * Dispose of the resources held by the pdf widget.
    */
-  dispose() {
+  dispose(): void {
     if (this._disposable) {
       this._disposable.dispose();
     }
@@ -129,19 +136,12 @@ export const rendererFactory: IRenderMime.IRendererFactory = {
 const extensions: IRenderMime.IExtension | IRenderMime.IExtension[] = [
   {
     id: '@jupyterlab/pdf-extension:factory',
+    description: 'Adds renderer for PDF content.',
     rendererFactory,
     dataType: 'string',
-    fileTypes: [
-      {
-        name: 'PDF',
-        displayName: 'PDF',
-        fileFormat: 'base64',
-        mimeTypes: [MIME_TYPE],
-        extensions: ['.pdf']
-      }
-    ],
     documentWidgetFactoryOptions: {
       name: 'PDF',
+      // TODO: translate label
       modelName: 'base64',
       primaryFileType: 'PDF',
       fileTypes: ['PDF'],
@@ -183,16 +183,16 @@ namespace Private {
     sliceSize: number = 512
   ): Blob {
     const byteCharacters = atob(b64Data);
-    let byteArrays: Uint8Array[] = [];
+    const byteArrays: Uint8Array[] = [];
 
     for (let offset = 0; offset < byteCharacters.length; offset += sliceSize) {
-      let slice = byteCharacters.slice(offset, offset + sliceSize);
+      const slice = byteCharacters.slice(offset, offset + sliceSize);
 
-      let byteNumbers = new Array(slice.length);
+      const byteNumbers = new Array(slice.length);
       for (let i = 0; i < slice.length; i++) {
         byteNumbers[i] = slice.charCodeAt(i);
       }
-      let byteArray = new Uint8Array(byteNumbers);
+      const byteArray = new Uint8Array(byteNumbers);
       byteArrays.push(byteArray);
     }
 

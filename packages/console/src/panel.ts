@@ -1,98 +1,110 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import { ClientSession, IClientSession } from '@jupyterlab/apputils';
-
+import {
+  ISessionContext,
+  MainAreaWidget,
+  SessionContext,
+  SessionContextDialogs
+} from '@jupyterlab/apputils';
 import { IEditorMimeTypeService } from '@jupyterlab/codeeditor';
-
 import { PathExt, Time } from '@jupyterlab/coreutils';
-
-import { UUID } from '@phosphor/coreutils';
-
 import {
   IRenderMimeRegistry,
   RenderMimeRegistry
 } from '@jupyterlab/rendermime';
-
 import { ServiceManager } from '@jupyterlab/services';
-
-import { Token } from '@phosphor/coreutils';
-
-import { Message } from '@phosphor/messaging';
-
-import { Panel } from '@phosphor/widgets';
-
+import { ITranslator, nullTranslator } from '@jupyterlab/translation';
+import { consoleIcon } from '@jupyterlab/ui-components';
+import { Token, UUID } from '@lumino/coreutils';
+import { IDisposable } from '@lumino/disposable';
+import { Message } from '@lumino/messaging';
+import { Panel } from '@lumino/widgets';
 import { CodeConsole } from './widget';
-import { IDisposable } from '@phosphor/disposable';
+import type { IConsoleCellExecutor } from './tokens';
 
 /**
  * The class name added to console panels.
  */
 const PANEL_CLASS = 'jp-ConsolePanel';
 
-const CONSOLE_ICON_CLASS = 'jp-CodeConsoleIcon';
-
 /**
  * A panel which contains a console and the ability to add other children.
  */
-export class ConsolePanel extends Panel {
+export class ConsolePanel extends MainAreaWidget<Panel> {
   /**
    * Construct a console panel.
    */
   constructor(options: ConsolePanel.IOptions) {
-    super();
+    super({ content: new Panel() });
     this.addClass(PANEL_CLASS);
     let {
+      executor,
       rendermime,
       mimeTypeService,
       path,
       basePath,
       name,
       manager,
-      modelFactory
+      modelFactory,
+      sessionContext,
+      translator
     } = options;
-    let contentFactory = (this.contentFactory =
-      options.contentFactory || ConsolePanel.defaultContentFactory);
-    let count = Private.count++;
+    this.translator = translator ?? nullTranslator;
+    const trans = this.translator.load('jupyterlab');
+
+    const contentFactory = (this.contentFactory = options.contentFactory);
+    const count = Private.count++;
     if (!path) {
-      path = `${basePath || ''}/console-${count}-${UUID.uuid4()}`;
+      path = PathExt.join(basePath || '', `console-${count}-${UUID.uuid4()}`);
     }
 
-    let session = (this._session = new ClientSession({
-      manager: manager.sessions,
-      path,
-      name: name || `Console ${count}`,
-      type: 'console',
-      kernelPreference: options.kernelPreference,
-      setBusy: options.setBusy
-    }));
+    sessionContext = this._sessionContext =
+      sessionContext ??
+      new SessionContext({
+        kernelManager: manager.kernels,
+        sessionManager: manager.sessions,
+        specsManager: manager.kernelspecs,
+        path: manager.contents.localPath(path),
+        name: name || trans.__('Console %1', count),
+        type: 'console',
+        kernelPreference: options.kernelPreference,
+        setBusy: options.setBusy
+      });
 
-    let resolver = new RenderMimeRegistry.UrlResolver({
-      session,
+    const resolver = new RenderMimeRegistry.UrlResolver({
+      path,
       contents: manager.contents
     });
     rendermime = rendermime.clone({ resolver });
 
     this.console = contentFactory.createConsole({
+      executor,
       rendermime,
-      session,
+      sessionContext: sessionContext,
       mimeTypeService,
       contentFactory,
-      modelFactory
+      modelFactory,
+      translator
     });
-    this.addWidget(this.console);
+    this.content.addWidget(this.console);
 
-    void session.initialize().then(() => {
+    void sessionContext.initialize().then(async value => {
+      if (value) {
+        await (
+          options.sessionDialogs ?? new SessionContextDialogs({ translator })
+        ).selectKernel(sessionContext!);
+      }
       this._connected = new Date();
-      this._updateTitle();
+      this._updateTitlePanel();
     });
 
     this.console.executed.connect(this._onExecuted, this);
-    this._updateTitle();
-    session.kernelChanged.connect(this._updateTitle, this);
-    session.propertyChanged.connect(this._updateTitle, this);
+    this._updateTitlePanel();
+    sessionContext.kernelChanged.connect(this._updateTitlePanel, this);
+    sessionContext.propertyChanged.connect(this._updateTitlePanel, this);
 
-    this.title.icon = CONSOLE_ICON_CLASS;
+    this.title.icon = consoleIcon;
     this.title.closable = true;
     this.id = `console-${count}`;
   }
@@ -105,20 +117,20 @@ export class ConsolePanel extends Panel {
   /**
    * The console widget used by the panel.
    */
-  readonly console: CodeConsole;
+  console: CodeConsole;
 
   /**
    * The session used by the panel.
    */
-  get session(): IClientSession {
-    return this._session;
+  get sessionContext(): ISessionContext {
+    return this._sessionContext;
   }
 
   /**
    * Dispose of the resources held by the widget.
    */
   dispose(): void {
-    this.session.dispose();
+    this.sessionContext.dispose();
     this.console.dispose();
     super.dispose();
   }
@@ -127,9 +139,9 @@ export class ConsolePanel extends Panel {
    * Handle `'activate-request'` messages.
    */
   protected onActivateRequest(msg: Message): void {
-    let prompt = this.console.promptCell;
+    const prompt = this.console.promptCell;
     if (prompt) {
-      prompt.editor.focus();
+      prompt.editor!.focus();
     }
   }
 
@@ -146,19 +158,20 @@ export class ConsolePanel extends Panel {
    */
   private _onExecuted(sender: CodeConsole, args: Date) {
     this._executed = args;
-    this._updateTitle();
+    this._updateTitlePanel();
   }
 
   /**
    * Update the console panel title.
    */
-  private _updateTitle(): void {
-    Private.updateTitle(this, this._connected, this._executed);
+  private _updateTitlePanel(): void {
+    Private.updateTitle(this, this._connected, this._executed, this.translator);
   }
 
+  translator: ITranslator;
   private _executed: Date | null = null;
   private _connected: Date | null = null;
-  private _session: ClientSession;
+  private _sessionContext: ISessionContext;
 }
 
 /**
@@ -178,6 +191,11 @@ export namespace ConsolePanel {
      * The content factory for the panel.
      */
     contentFactory: IContentFactory;
+
+    /**
+     * Console cell executor
+     */
+    executor?: IConsoleCellExecutor;
 
     /**
      * The service manager used by the panel.
@@ -202,7 +220,17 @@ export namespace ConsolePanel {
     /**
      * A kernel preference.
      */
-    kernelPreference?: IClientSession.IKernelPreference;
+    kernelPreference?: ISessionContext.IKernelPreference;
+
+    /**
+     * An existing session context to use.
+     */
+    sessionContext?: ISessionContext;
+
+    /**
+     * Session dialogs to use.
+     */
+    sessionDialogs?: ISessionContext.IDialogs;
 
     /**
      * The model factory for the console widget.
@@ -213,6 +241,11 @@ export namespace ConsolePanel {
      * The service used to look up mime types.
      */
     mimeTypeService: IEditorMimeTypeService;
+
+    /**
+     * The application language translator.
+     */
+    translator?: ITranslator;
 
     /**
      * A function to call when the kernel is busy.
@@ -233,8 +266,10 @@ export namespace ConsolePanel {
   /**
    * Default implementation of `IContentFactory`.
    */
-  export class ContentFactory extends CodeConsole.ContentFactory
-    implements IContentFactory {
+  export class ContentFactory
+    extends CodeConsole.ContentFactory
+    implements IContentFactory
+  {
     /**
      * Create a new console panel.
      */
@@ -254,18 +289,12 @@ export namespace ConsolePanel {
   }
 
   /**
-   * A default code console content factory.
-   */
-  export const defaultContentFactory: IContentFactory = new ContentFactory();
-
-  /* tslint:disable */
-  /**
    * The console renderer token.
    */
   export const IContentFactory = new Token<IContentFactory>(
-    '@jupyterlab/console:IContentFactory'
+    '@jupyterlab/console:IContentFactory',
+    'A factory object that creates new code consoles. Use this if you want to create and host code consoles in your own UI elements.'
   );
-  /* tslint:enable */
 }
 
 /**
@@ -283,20 +312,35 @@ namespace Private {
   export function updateTitle(
     panel: ConsolePanel,
     connected: Date | null,
-    executed: Date | null
-  ) {
-    let session = panel.console.session;
-    let caption =
-      `Name: ${session.name}\n` +
-      `Directory: ${PathExt.dirname(session.path)}\n` +
-      `Kernel: ${session.kernelDisplayName}`;
-    if (connected) {
-      caption += `\nConnected: ${Time.format(connected.toISOString())}`;
+    executed: Date | null,
+    translator?: ITranslator
+  ): void {
+    translator = translator || nullTranslator;
+    const trans = translator.load('jupyterlab');
+
+    const sessionContext = panel.console.sessionContext.session;
+    if (sessionContext) {
+      // FIXME:
+      let caption =
+        trans.__('Name: %1\n', sessionContext.name) +
+        trans.__('Directory: %1\n', PathExt.dirname(sessionContext.path)) +
+        trans.__('Kernel: %1', panel.console.sessionContext.kernelDisplayName);
+
+      if (connected) {
+        caption += trans.__(
+          '\nConnected: %1',
+          Time.format(connected.toISOString())
+        );
+      }
+
+      if (executed) {
+        caption += trans.__('\nLast Execution: %1');
+      }
+      panel.title.label = sessionContext.name;
+      panel.title.caption = caption;
+    } else {
+      panel.title.label = trans.__('Console');
+      panel.title.caption = '';
     }
-    if (executed) {
-      caption += `\nLast Execution: ${Time.format(executed.toISOString())}`;
-    }
-    panel.title.label = session.name || 'Console';
-    panel.title.caption = caption;
   }
 }

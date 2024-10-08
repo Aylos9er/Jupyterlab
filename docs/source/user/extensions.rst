@@ -1,76 +1,101 @@
+.. Copyright (c) Jupyter Development Team.
+.. Distributed under the terms of the Modified BSD License.
+
 .. _user_extensions:
 
 Extensions
-----------
+==========
 
 Fundamentally, JupyterLab is designed as an extensible environment. JupyterLab
-extensions can customize or enhance any part of JupyterLab. They can provide new
-themes, file viewers and editors, or renderers for rich outputs in notebooks.
-Extensions can add items to the menu or command palette, keyboard shortcuts, or
-settings in the settings system. Extensions can provide an API for other
-extensions to use and can depend on other extensions. In fact, the whole of
-JupyterLab itself is simply a collection of extensions that are no more powerful
-or privileged than any custom extension.
+extensions can customize or enhance any part of JupyterLab. They can provide
+new themes, file viewers and editors, or renderers for rich outputs in
+notebooks. Extensions can add items to the menu or command palette, keyboard
+shortcuts, or settings in the settings system. Extensions can provide an API
+for other extensions to use and can depend on other extensions. In fact, the
+whole of JupyterLab itself is simply a collection of extensions that are no
+more powerful or privileged than any custom extension.
 
-JupyterLab extensions are `npm <https://www.npmjs.com/>`__ packages (the
-standard package format in Javascript development). You can search for the
-keyword `jupyterlab-extension
-<https://www.npmjs.com/search?q=keywords%3Ajupyterlab-extension>`__ on the
-npm registry to find extensions. For information about developing extensions,
-see the :ref:`developer documentation <developer_extensions>`.
+For information about developing extensions, see the :ref:`developer
+documentation <developer_extensions>`.
 
+
+.. contents:: Table of contents
+    :local:
+    :depth: 1
+
+Installing Extensions
+---------------------
+
+A JupyterLab extension contains JavaScript that is installed into Jupyterlab and
+run in the browser. An extension contains one or more plugins that extend JupyterLab.
+The preferred JupyterLab extension type is a *prebuilt extension* because it does not
+require rebuilding JupyterLab JavaScript files.
+
+Most JupyterLab extensions can be installed using Python :ref:`pip <user_trove_classifiers>`
+or ``conda`` packages. These packages may also include a server-side component
+necessary for the extension to function.
+
+.. _user_trove_classifiers:
+
+Browsing Extensions on PyPI
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The Python Package Index (PyPI) is a repository of software for the Python
+programming language, and the default source of packages for the ``pip`` package
+manager. While a `simple text search <https://pypi.org/search/?q=jupyterlab&o=>`__
+will reveal hundreds of packages, a number of
+`trove classifiers <https://pypi.org/classifiers>`__ are available for packages
+to self-describe the features and compatibility provided:
+
+- `Framework :: Jupyter :: JupyterLab <https://pypi.org/search/?c=Framework+%3A%3A+Jupyter+%3A%3A+JupyterLab>`__
+- `Framework :: Jupyter :: JupyterLab :: 1 <https://pypi.org/search/?c=Framework+%3A%3A+Jupyter+%3A%3A+JupyterLab+%3A%3A+1>`__
+- `Framework :: Jupyter :: JupyterLab :: 2 <https://pypi.org/search/?c=Framework+%3A%3A+Jupyter+%3A%3A+JupyterLab+%3A%3A+2>`__
+- `Framework :: Jupyter :: JupyterLab :: 3 <https://pypi.org/search/?c=Framework+%3A%3A+Jupyter+%3A%3A+JupyterLab+%3A%3A+3>`__
+- `Framework :: Jupyter :: JupyterLab :: 4 <https://pypi.org/search/?c=Framework+%3A%3A+Jupyter+%3A%3A+JupyterLab+%3A%3A+4>`__
+- `Framework :: Jupyter :: JupyterLab :: Extensions <https://pypi.org/search/?c=Framework+%3A%3A+Jupyter+%3A%3A+JupyterLab+%3A%3A+Extensions>`__
+- `Framework :: Jupyter :: JupyterLab :: Extensions :: Mime Renderers <https://pypi.org/search/?c=Framework+%3A%3A+Jupyter+%3A%3A+JupyterLab+%3A%3A+Extensions+%3A%3A+Mime+Renderers>`__
+- `Framework :: Jupyter :: JupyterLab :: Extensions :: Prebuilt <https://pypi.org/search/?c=Framework+%3A%3A+Jupyter+%3A%3A+JupyterLab+%3A%3A+Extensions+%3A%3A+Prebuilt>`__
+- `Framework :: Jupyter :: JupyterLab :: Extensions :: Themes <https://pypi.org/search/?c=Framework+%3A%3A+Jupyter+%3A%3A+JupyterLab+%3A%3A+Extensions+%3A%3A+Themes>`__
 
 .. note::
 
-   If you are a JupyterLab extension developer, please note that the extension
-   developer API is not stable and will evolve in the near future.
+   These classifiers were accepted in early August 2021, and it will take some
+   time for them to be broadly adopted.
 
+   *You can help!* The proposal of classifiers to a packages's ``setup.py``,
+   ``setup.cfg``, or ``pyproject.toml`` can make a *great* first open source
+   :ref:`contribution <dev_trove_classifiers>`, as such contributions are:
 
-In order to install JupyterLab extensions, you need to have `Node.js
-<https://nodejs.org/>`__ installed.
+   - easy for *you*, often possible directly through a project's source code
+     website, e.g. GitHub or GitLab,
+   - easy for maintainers to review and merge, and
+   - can have a positive impact on the discoverability of the package
 
-If you use ``conda``, you can get it with:
+Managing Extensions Using the Extension Manager
+-----------------------------------------------
 
-.. code:: bash
+.. _extension_manager:
 
-    conda install -c conda-forge nodejs
+You can use the Extension Manager in JupyterLab to manage extensions. That feature
+may have been disabled by your system administrator for security reasons.
 
-If you use `Homebrew <https://brew.sh/>`__ on Mac OS X:
+.. note::
 
-.. code:: bash
+   Since JupyterLab v4, the default manager uses PyPI.org as source for the available
+   extensions and ``pip`` to install them.
 
-    brew install node
+   An extension will be listed if the Python package has the classifier:
+   `Framework :: Jupyter :: JupyterLab :: Extensions :: Prebuilt <https://pypi.org/search/?c=Framework+%3A%3A+Jupyter+%3A%3A+JupyterLab+%3A%3A+Extensions+%3A%3A+Prebuilt>`__
+   Moreover it is advised for extension author to provide the ``install.json`` file
+   to specify the exact Python package name.
 
-You can also download Node.js from the `Node.js website <https://nodejs.org/>`__ and
-install it directly.
+.. warning::
+   There is no check to ensure the extension is compatible with the current JupyterLab
+   version.
 
+The Extension Manager is in the :ref:`left sidebar <left-sidebar>`.
 
-Using the Extension Manager
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-To manage your extensions, you can use the extension manager. By default, the
-manager is disabled. You can enable it by searching **Extension Manager** in the command palette.
-
-.. figure:: images/extension_manager_enable_manager.png
-   :align: center
-   :class: jp-screenshot
-
-   **Figure:** Enable extension manager by searching in the command palette
-
-You can also enable it with the following steps:
-
-
-   - Go into advanced settings editor.
-   - Open the Extension Manager section.
-   - Add the entry "enabled": true.
-   - Save the settings.
-   - If prompted whether you are sure, read the warning, and click "Enable"
-     if you are still sure.
-
-Once enabled, you should see a new tab appear in the :ref:`left sidebar <left-sidebar>`.
-
-
-.. figure:: images/extension_manager_default.png
+.. figure:: ../images/extensions-default.png
    :align: center
    :class: jp-screenshot
 
@@ -78,32 +103,65 @@ Once enabled, you should see a new tab appear in the :ref:`left sidebar <left-si
    section, and a "Discover" section.
 
 
+Disclaimer
+^^^^^^^^^^
+
+.. danger::
+
+    Installing an extension allows it to execute arbitrary code on the server,
+    kernel, and the browser. Therefore, we ask you to explicitly acknowledge
+    this.
+
+
+By default, the disclaimer is not acknowledged.
+
+.. figure:: ../images/extensions-disabled.png
+   :align: center
+   :class: jp-screenshot
+
+   **Figure:** User has not acknowledged the disclaimer
+
+
+As the disclaimer is not acknowledged, you can search for an extension,
+but can not install it (no install button is available).
+
+
+To install an extension, you first have to explicitly acknowledge the disclaimer.
+Once done, this will remain across sessions and the user does not have to
+check it again.
+
+.. figure:: ../images/extensions-enabled.png
+   :align: center
+   :class: jp-screenshot
+
+   **Figure:** Disclaimer checked
+
+For ease of use, you can collapse the disclaimer so it takes less space on
+your screen.
+
+
 Finding Extensions
 ^^^^^^^^^^^^^^^^^^
 
 You can use the extension manager to find extensions for JupyterLab. To discovery
 freely among the currently available extensions, expand the "Discovery" section.
-This triggers a search for all JupyterLab extensions on the NPM registry, and
-the results are listed according to the `registry's sort order
-<https://docs.npmjs.com/searching-for-and-choosing-packages-to-download#package-search-rank-criteria>`__.
-An exception to this sort order is that extensions released by the Jupyter
-organization are always placed first. These extensions are distinguished by
-a small Jupyter icon next to their name.
+This triggers a search for all JupyterLab extensions on the PyPI.org registry, and
+the results are listed alphabetically.
 
 
-.. image:: images/extension_manager_discover.png
+.. figure:: ../images/extensions-default.png
    :align: center
    :class: jp-screenshot
-   :alt: Screenshot showing the discovery extension listing.
+   :alt: The discovery extension listing.
 
 
 Alternatively, you can limit your discovery by using the search bar. This
-performs a free-text search of JupyterLab extensions on the NPM registry.
+performs a free-text search of JupyterLab extensions on the PyPI.org registry.
 
-.. image:: images/extension_manager_search.png
+.. image:: ../images/extensions-search.png
    :align: center
    :class: jp-screenshot
-   :alt: Screenshot showing an example search result
+   :alt: An example search result in the discovery extension listing.
 
 
 Installing an Extension
@@ -120,49 +178,7 @@ it by clicking the "Install" button of the extension list entry.
     avoid installing extensions you do not trust, and watch out for
     any extensions trying to masquerade as a trusted extension.
 
-
-A short while after starting the install of an extension, a drop-down should
-appear under the search bar indicating that the extension has been
-downloaded, but that a rebuild is needed to complete the installation.
-
-
-.. image:: images/extension_manager_rebuild.png
-   :align: center
-   :class: jp-screenshot
-   :alt: Screenshot showing the rebuild indicator
-
-
-If you want to install/uninstall other extensions as well, you can ignore
-the rebuild notice until you have made all the changes you want. Once satisfied,
-click the 'Rebuild' button to start a rebuild in the background.
-Once the rebuild completes, a dialog will pop up, indicating that a reload of
-the page is needed in order to load the latest build into the browser.
-
-If you ignore the rebuild notice by mistake, simply refresh your browser
-window to trigger a new rebuild check.
-
-
-Disabling Rebuild Checks
-~~~~~~~~~~~~~~~~~~~~~~~~
-
-In some cases, such as automated testing, you may wish to disable the startup
-rebuild checks altogether. This can be achieved through setting ``buildCheck``
-and ``buildAvailable`` in ``jupyter_notebook_config.json`` (or ``.py`` equivalent)
-in any of the ``config`` locations returned by ``jupyter --paths``.
-
-
-.. code:: json
-
-    {
-      "LabApp": {
-        "tornado_settings": {
-          "page_config_data": {
-            "buildCheck": false,
-            "buildAvailable": false,
-          }
-        }
-      }
-    }
+The newly installed extension may require JupyterLab to be restarted.
 
 
 Managing Installed Extensions
@@ -173,87 +189,370 @@ section. These can then be uninstalled or disabled. Disabling an extension will
 prevent it from being activated, but without rebuilding the application.
 
 
-Companion packages
-^^^^^^^^^^^^^^^^^^
+Configuring the Extension Manager
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-During installation of an extension, JupyterLab will inspect the package
-metadata for any
-:ref:`instructions on companion packages <ext-author-companion-packages>`.
-Companion packages can be:
+By default there are two extension managers provided by JupyterLab:
 
-   - Notebook server extensions (or any other packages that need to be
-     installed on the Notebook server).
-   - Kernel packages. An example of companion packages for the
-     kernel are Jupyter Widget packages, like the `ipywidgets <https://ipywidgets.readthedocs.io/en/stable>`__
-     Python package for the
-     `@jupyter-widgets/jupyterlab-manager package <https://www.npmjs.com/package/@jupyter-widgets/jupyterlab-manager>`__.
+- ``pypi``: [default] Allow to un-/install extensions from PyPI.org
+- ``readonly``: Display installed extensions (with the ability to dis-/en-able them)
 
-If JupyterLab finds instructions for companion packages, it will present
-a dialog to notify you about these. These are informational only, and it
-will be up to you to take these into account or not.
+You can specify the manager with the command line option ``--LabApp.extension_manager``;
+e.g. to use the *read-only* manager:
+
+.. code:: sh
+
+    jupyter lab --LabApp.extension_manager=readonly
+
+PyPI Manager settings
+"""""""""""""""""""""
+
+The ``pypi`` manager have specific options that can be set using command line options:
+
+- ``--PyPIExtensionManager.base_url``: PyPI warehouse base URL - default to https://pypi.org/pypi.
+- ``--PyPIExtensionManager.rpc_request_throttling``: Throttling time between requests to the PyPI XML-RPC API in seconds - default 1.
+- ``--PyPIExtensionManager.cache_timeout``: PyPI extensions list cache timeout in seconds - default 300.
+- ``--PyPIExtensionManager.package_metadata_cache_size``: The cache size for package metadata - default 1500.
+
+.. _extension_listings:
+
+Listings
+^^^^^^^^
+
+When searching extensions in the Extension Manager, JupyterLab displays the complete
+search result and the user is free to install any source extension. This is the :ref:`default_mode`.
+
+To bring more security, you or your administrator can enable ``blocklists`` or ``allowlists``
+mode. JupyterLab will check the extensions against the defined listings.
+
+.. warning::
+
+    Only one mode at a time is allowed. If you or your server administrator configures
+    both block and allow listings, the allow listing takes precedence.
 
 
+The following details the behavior for the :ref:`blocklist_mode` and the :ref:`allowlist_mode`.
+The details to enable configure the listings can be read :ref:`listings_conf`.
 
-Using the Terminal
-~~~~~~~~~~~~~~~~~~~~~
+.. _default_mode:
 
-Another way of managing your extensions is from the terminal on the server,
-using the ``jupyter labextension`` entry point. In general, a simple help text
-is available by typing ``jupyter labextension --help``.
+Default mode
+""""""""""""
+
+In the ``default`` mode, no listing is enabled and the search behavior is unchanged and
+is the one described previously.
+
+.. _blocklist_mode:
+
+Blocklist mode
+""""""""""""""
+
+Extensions can be freely downloaded without going through a vetting process.
+However, users can add malicious extensions to a blocklist. The extension manager
+will show all extensions except for those that have
+been explicitly added to the blocklist. Therefore, the extension manager
+does not allow you to install blocklisted extensions.
+
+If you, or your administrator, has enabled the blocklist mode,
+JupyterLab will use the blocklist and remove all blocklisted
+extensions from your search result.
+
+If you have installed an extension before it has been blocklisted,
+the extension entry in the installed list will be highlighted
+in red. It is recommended that you uninstall it. You can move
+your mouse on the question mark icon to read the instructions.
+
+.. figure:: ../images/extensions-blocked-list.png
+   :align: center
+   :class: jp-screenshot
+
+   **Figure:** Blocklisted installed extension which should be removed
 
 
-Installing Extensions
-^^^^^^^^^^^^^^^^^^^^^
+.. _allowlist_mode:
+
+Allowlist mode
+""""""""""""""
+
+An allowlist maintains a set of approved extensions that users can freely
+search and install. Extensions need to go through some sort of vetting process
+before they are added to the allowlist. When using an allowlist, the extension manager
+will only show extensions that have been explicitly added to the allowlist.
+
+If you, or your administrator, has enabled the allowlist mode
+JupyterLab will use the allowlist and only show extensions present
+in the allowlist. The other extensions will not be show in the search result.
+
+If you have installed an allowlisted extension and at some point
+in time that extension is removed from the allowlist, the extension entry
+in the installed list will be highlighted in red. It is recommended that
+you uninstall it. You can move your mouse on the question mark icon to
+read the instructions.
+
+.. figure:: ../images/extensions-allowed-list.png
+   :align: center
+   :class: jp-screenshot
+
+   **Figure:** The second of the installed extensions was removed from the allowlist and should be removed
+
+.. _listings_conf:
+
+Listing Configuration
+"""""""""""""""""""""
+
+You or your administrator can use the following traits to define the listings loading.
+
+- ``blocked_extensions_uris``: A list of comma-separated URIs to fetch a blocklist file from
+- ``allowed_extensions_uris``: A list of comma-separated URIs to fetch an allowlist file from
+- ``listings_refresh_seconds``: The interval delay in seconds to refresh the lists
+- ``listings_tornado_options``: The optional kwargs to use for the listings HTTP requests
+
+For example, to set blocked extensions, launch the server with
+``--LabServerApp.blocked_extensions_uris=http://example.com/blocklist.json`` where
+``http://example.com/blocklist.json`` is a JSON file as described below.
+
+The details for the ``listings_tornado_options`` are listed
+on `this page <https://www.tornadoweb.org/en/stable/httpclient.html#tornado.httpclient.HTTPRequest>`__
+(for example, you could pass ``{'request_timeout': 10}`` to change the HTTP request timeout value).
+
+The listings are json files hosted on the URIs you have given.
+
+For each entry, you have to define the `name` of the extension as published in the NPM registry.
+The ``name`` attribute supports regular expressions.
+
+Optionally, you can also add some more fields for your records (``type``, ``reason``, ``creation_date``,
+``last_update_date``). These optional fields are not used in the user interface.
+
+This is an example of a blocklist file.
+
+.. code:: json
+
+   {
+     "blocked_extensions": [
+       {
+         "name": "@jupyterlab-examples/launcher",
+         "type": "jupyterlab",
+         "reason": "@jupyterlab-examples/launcher is blocklisted for test purpose - Do NOT take this for granted!!!",
+         "creation_date": "2020-03-11T03:28:56.782Z",
+         "last_update_date":  "2020-03-11T03:28:56.782Z"
+       }
+     ]
+   }
 
 
-You can install new extensions into the application
-using the command:
+In the following allowed extensions ``@jupyterlab/*`` will allow
+all jupyterlab organization extensions.
+
+.. code:: json
+
+   {
+     "allowed_extensions": [
+       {
+         "name": "@jupyterlab/*",
+         "type": "jupyterlab",
+         "reason": "All @jupyterlab org extensions are allowed, of course…",
+         "creation_date": "2020-03-11T03:28:56.782Z",
+         "last_update_date":  "2020-03-11T03:28:56.782Z"
+       }
+     ]
+   }
+
+.. _plugin_manager:
+
+Managing Plugins with Plugin Manager
+------------------------------------
+
+Each JupyterLab extension is composed of one or more plugins. Plugins are also
+used by JupyterLab core itself.
+
+The Advanced Plugin Manager enables listing and disabling individual plugins,
+but may have been disabled by your system administrator.
+
+Functionally, toggling an extension from the plugin manager is equivalent to
+running the ``jupyter labextension enable`` or ``jupyter labextension disable`` commands.
+
+
+.. image:: ../images/plugin-manager-search-notebook.png
+   :align: center
+   :class: jp-screenshot
+   :alt: An example search result in the plugin extension listing.
+
+
+Plugins can be enabled/disabled on ``system``, ``sys-prefix`` (default) or
+``user`` level, which influences where the ``page_config.json`` configuration
+file is written to (see ``config`` section in results of ``jupyter --paths``).
+To change the level for the plugin manager and the default extension manager
+use ``PluginManager.level`` trait (extension manager inherits from plugin manager).
+
+.. _locking_plugins:
+
+Locking and Unlocking Plugins
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Administrators may lock specific plugins with:
 
 .. code:: bash
 
-    jupyter labextension install my-extension
+    jupyter labextension lock my-extension:plugin
 
-where ``my-extension`` is the name of a valid JupyterLab extension npm package
-on `npm <https://www.npmjs.com>`__. Use the ``my-extension@version``
-syntax to install a specific version of an extension, for example:
+To unlock a locked plugin:
 
 .. code:: bash
 
-    jupyter labextension install my-extension@1.2.3
+    jupyter labextension unlock my-extension:plugin
 
-You can also install an extension that is not uploaded to npm, i.e.,
-``my-extension`` can be a local directory containing the extension, a gzipped
-tarball, or a URL to a gzipped tarball.
+The locked plugins appear on the plugin list with a lock icon and cannot be enabled/disabled from the user interface:
 
-We encourage extension authors to add the ``jupyterlab-extension``
-GitHub topic to any repository with a JupyterLab extension to facilitate
-discovery. You can see a list of extensions by searching GitHub for the
-`jupyterlab-extension <https://github.com/search?utf8=%E2%9C%93&q=topic%3Ajupyterlab-extension&type=Repositories>`__
-topic.
+.. image:: ../images/plugin-manager-plugin-locked.png
+   :align: center
+   :class: jp-screenshot
+   :alt: An example row of the plugin list with `@jupyterlab/pluginmanager-extension:plugin` plugin locked.
 
-You can list the currently installed extensions by running the command:
+
+Managing Extensions with ``jupyter labextension``
+-------------------------------------------------
+
+The ``jupyter labextension`` command enables you to list all installed extensions,
+or disable any extension. It also brings helper commands for developers. See the
+help with ``jupyter labextension --help``.
+
+Listing installed extensions
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+List all installed extensions with:
 
 .. code:: bash
 
     jupyter labextension list
 
-Uninstall an extension by running the command:
+.. note::
+   ``jupyter labextension`` identifies an extension by its plugin namespace
+   (the part prior to ``:``), which may be different from the name of the
+   ``pip`` or ``conda`` package used to distribute the extension.
+
+
+.. _enable_disable_config:
+
+Enabling and Disabling Extensions
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Disabling an extension prevents all plugins in that extension from running in
+JupyterLab (though the code is still loaded). You can disable specific JupyterLab
+extensions (including core extensions) too:
 
 .. code:: bash
 
-    jupyter labextension uninstall my-extension
+    jupyter labextension disable my-extension
 
-where ``my-extension`` is the name of the extension, as printed in the
-extension list. You can also uninstall core extensions using this
-command (you can always re-install core extensions later).
+You can enable a disabled extension with:
 
-Installing and uninstalling extensions can take some time, as they are
-downloaded, bundled with the core extensions, and the whole application
-is rebuilt. You can install/uninstall more than one extension in the
-same command by listing their names after the ``install`` command.
+.. code:: bash
+
+    jupyter labextension enable my-extension
+
+Installed extensions are enabled by default unless there is configuration
+explicitly disabling them.
+Extensions can be disabled or enabled using the command line.
+Extensions or individual plugins within an extension can be disabled by another
+extension.
+
+The priority order for determining whether an extension is enabled or disabled
+is as follows:
+
+- Presence of ``<jupyter_config_path>/labconfig/page_config.json`` file(s) with
+  a ``disabledExtensions`` key that is a object with package names as keys and boolean values.
+- (deprecated) Presence of ``disabledExtensions`` key in ``<lab_app_dir>/settings/page_config.json``.
+  This value is a list of extensions to disable, but is deprecated in favor of the
+  layered configuration approach in the `labconfig` location(s).
+- Presence of ``disabledExtensions`` key in another JupyterLab extension's metadata
+  that disables a given extension.  The key is ignored if that extension itself is
+  disabled.
+
+When using the command line, you can target the ``--level`` of the config:
+``user``, ``system``, or ``sys-prefix`` (default).
+
+An example ``<jupyter_config_path>/labconfig/page_config.json`` could look as
+follows:
+
+.. code:: json
+
+   {
+      "disabledExtensions": {
+            "@jupyterlab/notebook-extension": true
+      }
+   }
+
+See :ref:`documentation on LabConfig directories <labconfig_directories>` for
+more information.
+
+Un-/Installing using ``jupyter labextension``
+---------------------------------------------
+
+.. note::
+
+   This way of un-/installing JupyterLab extensions is highly discouraged.
+
+The ``jupyter labextension`` command enables you to install or uninstall
+source extensions from `npm <https://www.npmjs.com/search?q=keywords:jupyterlab-extension>`__.
+See the help with ``jupyter labextension --help``. But to install those
+source extensions, you first need to install Node.js.
+
+.. _installing_nodejs:
+
+Installing Node.js
+^^^^^^^^^^^^^^^^^^
+
+Source extensions require `Node.js <https://nodejs.org/>`__ to rebuild
+JupyterLab and activate the extension. If you use ``conda`` with
+``conda-forge`` packages, you can get Node.js with:
+
+.. code:: bash
+
+    conda install -c conda-forge nodejs
+
+If you use ``conda`` with default Anaconda packages (i.e., you don't normally
+use ``conda-forge``), you should install Node.js from the Anaconda default
+channel with ``conda install nodejs`` instead.
+
+You may also be able to get Node.js from your system package manager, or you
+can download Node.js from the `Node.js website <https://nodejs.org/>`__
+and install it directly.
+
+.. _install_command:
+
+Installing and Uninstalling Source Extensions
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+You can install source extensions from `npm
+<https://www.npmjs.com/search?q=keywords:jupyterlab-extension>`__ with:
+
+.. code:: bash
+
+    jupyter labextension install my-extension my-other-extension
+
+Use the ``my-extension@version`` syntax to install a specific version
+of an extension, for example:
+
+.. code:: bash
+
+    jupyter labextension install my-extension@1.2.3
+
+You can also install a source extension that is not uploaded to npm, i.e.,
+``my-extension`` can be a local directory containing the extension, a
+gzipped tarball, or a URL to a gzipped tarball.
+
+.. note::
+    Installing a source extension will require :ref:`installing
+    Node.js <installing_nodejs>` and require a rebuild of JupyterLab.
+
+Uninstall source extensions using the command:
+
+.. code:: bash
+
+    jupyter labextension uninstall my-extension my-other-extension
 
 If you are installing/uninstalling several extensions in several stages,
-you may want to defer rebuilding the application by including the flag
+you may want to defer rebuilding JupyterLab by including the flag
 ``--no-build`` in the install/uninstall step. Once you are ready to
 rebuild, you can run the command:
 
@@ -261,273 +560,10 @@ rebuild, you can run the command:
 
     jupyter lab build
 
-
-**Note**
-If using Windows, you may encounter a `FileNotFoundError` due to the default PATH length on
-Windows.  Node modules are stored in a nested file structure, so the path can get quite
-long.  If you have administrative access and are on Windows 8 or 10, you can update the
-registry setting using these instructions: https://stackoverflow.com/a/37528731.
-
-
-Disabling Extensions
-^^^^^^^^^^^^^^^^^^^^
-
-You can disable specific JupyterLab extensions (including core
-extensions) without rebuilding the application by running the command:
-
-.. code:: bash
-
-    jupyter labextension disable my-extension
-
-This will prevent the extension from loading in the browser, but does not
-require a rebuild.
-
-You can re-enable an extension using the command:
-
-.. code:: bash
-
-    jupyter labextension enable my-extension
-
-Advanced Usage
-~~~~~~~~~~~~~~
-
-Any information that JupyterLab persists is stored in its application directory,
-including settings and built assets.
-This is separate from where the Python package is installed (like in ``site_packages``)
-so that the install directory is immutable.
-
-The application directory can be overridden using ``--app-dir`` in
-any of the JupyterLab commands, or by setting the ``JUPYTERLAB_DIR``
-environment variable. If not specified, it will default to
-``<sys-prefix>/share/jupyter/lab``, where ``<sys-prefix>`` is the
-site-specific directory prefix of the current Python environment. You
-can query the current application path by running ``jupyter lab path``.
-Note that the application directory is expected to contain the JupyterLab
-static assets (e.g. `static/index.html`).  If JupyterLab is launched
-and the static assets are not present, it will display an error in the console and in the browser.
-
-JupyterLab Build Process
-^^^^^^^^^^^^^^^^^^^^^^^^
-
-To rebuild the app directory, run ``jupyter lab build``. By default, the
-``jupyter labextension install`` command builds the application, so you
-typically do not need to call ``build`` directly.
-
-Building consists of:
-
--  Populating the ``staging/`` directory using template files
--  Handling any locally installed packages
--  Ensuring all installed assets are available
--  Bundling the assets
--  Copying the bundled assets to the ``static`` directory
-
-Note that building will always use the latest JavaScript packages that meet
-the dependency requirements of JupyterLab itself and any installed extensions.
-If you wish to run JupyterLab with the set of pinned requirements that was
-shipped with the Python package, you can launch as
-``jupyter lab --core-mode``.
-
-**Note**
-
-The build process uses a specific ``yarn`` version with a default working 
-combination of npm packages stored in a ``yarn.lock`` file shipped with
-JupyterLab. Those package source urls point to the default yarn registry.
-But if you defined your own yarn registry in yarn configuration, the 
-default yarn registry will be replaced by your custom registry.
-
-If then you switch back to the default yarn registry, you will need to 
-clean your ``staging`` folder before building:
-
-.. code:: bash
-
-    jupyter lab clean
-    jupyter lab build
-
-
-JupyterLab Application Directory
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-The JupyterLab application directory contains the subdirectories
-``extensions``, ``schemas``, ``settings``, ``staging``, ``static``, and
-``themes``.  The default application directory mirrors the location where
-JupyterLab was installed.  For example, in a conda environment, it is in
-``<conda_root>/envs/<env_name>/share/jupyter/lab``.  The directory can be
-overridden by setting a ``JUPYTERLAB_DIR`` environment variable.
-
-It is not recommended to install JupyterLab in a root location (on Unix-like
-systems).  Instead, use a conda environment or ``pip install --user jupyterlab``
-so that the application directory ends up in a writable location.
-
-Note: this folder location and semantics do *not* follow the standard Jupyter
-config semantics because we need to build a single unified application, and the
-default config location for Jupyter is at the user level (user's home directory).
-By explicitly using a directory alongside the currently installed JupyterLab,
-we can ensure better isolation between conda or other virtual environments.
-
-.. _extensions-1:
-
-extensions
-''''''''''
-
-The ``extensions`` directory has the packed tarballs for each of the
-installed extensions for the app. If the application directory is not
-the same as the ``sys-prefix`` directory, the extensions installed in
-the ``sys-prefix`` directory will be used in the app directory. If an
-extension is installed in the app directory that exists in the
-``sys-prefix`` directory, it will shadow the ``sys-prefix`` version.
-Uninstalling an extension will first uninstall the shadowed extension,
-and then attempt to uninstall the ``sys-prefix`` version if called
-again. If the ``sys-prefix`` version cannot be uninstalled, its plugins
-can still be ignored using ``ignoredPackages`` metadata in ``settings``.
-
-schemas
-'''''''
-
-The ``schemas`` directory contains `JSON
-Schemas <http://json-schema.org/>`__ that describe the settings used by
-individual extensions. Users may edit these settings using the
-JupyterLab Settings Editor.
-
-settings
-''''''''
-
-The ``settings`` directory may contain ``page_config.json``, ``overrides.json``, and/or
-``build_config.json`` files, depending on which configurations are
-set on your system.
-
-.. _page_configjson:
-
-page_config.json
-
-
-The ``page_config.json`` data is used to provide configuration data to the
-application environment.
-
-The following configurations may be present in this file:
-
-1. ``terminalsAvailable`` identifies whether a terminal (i.e. ``bash/tsch``
-   on Mac/Linux OR ``PowerShell`` on Windows) is available to be launched
-   via the Launcher. (This configuration was predominantly required for
-   Windows prior to PowerShell access being enabled in Jupyter Lab.) The
-   value for this field is a Boolean: ``true`` or ``false``.
-2. ``disabledExtensions`` controls which extensions should not load at all.
-3. ``deferredExtensions`` controls which extensions should not load until
-   they are required by something, irrespective of whether they set
-   ``autoStart`` to ``true``.
-
-The value for the ``disabledExtensions`` and ``deferredExtensions`` fields
-are an array of strings. The following sequence of checks are performed
-against the patterns in ``disabledExtensions`` and ``deferredExtensions``.
-
--  If an identical string match occurs between a config value and a
-   package name (e.g., ``"@jupyterlab/apputils-extension"``), then the
-   entire package is disabled (or deferred).
--  If the string value is compiled as a regular expression and tests
-   positive against a package name (e.g.,
-   ``"disabledExtensions": ["@jupyterlab/apputils*$"]``), then the
-   entire package is disabled (or deferred).
--  If an identical string match occurs between a config value and an
-   individual plugin ID within a package (e.g.,
-   ``"disabledExtensions": ["@jupyterlab/apputils-extension:settings"]``),
-   then that specific plugin is disabled (or deferred).
--  If the string value is compiled as a regular expression and tests
-   positive against an individual plugin ID within a package (e.g.,
-   ``"disabledExtensions": ["^@jupyterlab/apputils-extension:set.*$"]``),
-   then that specific plugin is disabled (or deferred).
-
-An example of a ``page_config.json`` file is:
-
-.. code:: json
-
-    {
-        "disabledExtensions": [
-            "@jupyterlab/toc"
-        ],
-        "terminalsAvailable": false
-    }
-
-.. _overridesjson:
-
-overrides.json
-
-You can override default values of the extension settings by
-defining new default values in an ``overrides.json`` file.
-So for example, if you would like
-to set the dark theme by default instead of the light one, an
-``overrides.json`` file containing the following lines needs to be
-added in the application settings directory (by default this is the
-``share/jupyter/lab/settings`` folder).
-
-.. code:: json
-
-  {
-    "@jupyterlab/apputils-extension:themes": {
-      "theme": "JupyterLab Dark"
-    }
-  }
-
-.. _build_configjson:
-
-build_config.json
-
-
-The ``build_config.json`` file is used to track the local directories
-that have been installed using
-``jupyter labextension install <directory>``, as well as core extensions
-that have been explicitly uninstalled. An example of a
-``build_config.json`` file is:
-
-.. code:: json
-
-    {
-        "uninstalled_core_extensions": [
-            "@jupyterlab/markdownwidget-extension"
-        ],
-        "local_extensions": {
-            "@jupyterlab/python-tests": "/path/to/my/extension"
-        }
-    }
-
-
-staging and static
-''''''''''''''''''
-
-The ``static`` directory contains the assets that will be loaded by the
-JupyterLab application. The ``staging`` directory is used to create the
-build and then populate the ``static`` directory.
-
-Running ``jupyter lab`` will attempt to run the ``static`` assets in the
-application directory if they exist. You can run
-``jupyter lab --core-mode`` to load the core JupyterLab application
-(i.e., the application without any extensions) instead.
-
-themes
-''''''
-
-The ``themes`` directory contains assets (such as CSS and icons) for
-JupyterLab theme extensions.
-
-
-JupyterLab User Settings Directory
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-The user settings directory contains the user-level settings for Jupyter extensions.
-By default, the location is ``~/.jupyter/lab/user-settings/``, where ``~`` is the user's home directory. This folder is not in the JupyterLab application directory,
-because these settings are typically shared across Python environments.
-The location can be modified using the ``JUPYTERLAB_SETTINGS_DIR`` environment variable. Files are automatically created in this folder as modifications are made
-to settings from the JupyterLab UI. They can also be manually created.  The files
-follow the pattern of ``<package_name>/<extension_name>.jupyterlab-settings``.
-They are JSON files with optional comments. These values take precedence over the
-default values given by the extensions, but can be overridden by an ``overrides.json``
-file in the application's settings directory.
-
-
-JupyterLab Workspaces Directory
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-JupyterLab sessions always reside in a workspace. Workspaces contain the state
-of JupyterLab: the files that are currently open, the layout of the application
-areas and tabs, etc. When the page is refreshed, the workspace is restored.
-By default, the location is ``~/.jupyter/lab/workspacess/``, where ``~`` is the user's home directory. This folder is not in the JupyterLab application directory,
-because these files are typically shared across Python environments.
-The location can be modified using the ``JUPYTERLAB_WORKSPACES_DIR`` environment variable. These files can be imported and exported to create default "profiles",
-using the :ref:`workspace command line tool <url-workspaces-cli>`.
-
+.. note::
+   If you are rebuilding JupyterLab on Windows, you may encounter a
+   ``FileNotFoundError`` due to the default path length on Windows.  Node
+   modules are stored in a deeply nested directory structure, so paths can get
+   quite long. If you have administrative access and are on Windows 10 or newer
+   you can enable long paths by adding a dedicated
+   `registry key <https://learn.microsoft.com/en-us/windows/win32/fileio/maximum-file-path-limitation>`__.

@@ -1,4 +1,9 @@
-var version = require('./package.json').version;
+/*
+ * Copyright (c) Jupyter Development Team.
+ * Distributed under the terms of the Modified BSD License.
+ */
+
+const version = require('./package.json').version;
 
 module.exports = {
   entry: './lib',

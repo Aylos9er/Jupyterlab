@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/*-----------------------------------------------------------------------------
+/* -----------------------------------------------------------------------------
 | Copyright (c) Jupyter Development Team.
 | Distributed under the terms of the Modified BSD License.
 |----------------------------------------------------------------------------*/
@@ -8,27 +8,78 @@ import * as path from 'path';
 import * as utils from './utils';
 import packageJson from 'package-json';
 
-import commander from 'commander';
+import { program as commander } from 'commander';
 import semver from 'semver';
 
-let versionCache = new Map();
-const tags = /^([~^]?)([\w.]*)$/;
+const versionCache = new Map();
+
+/**
+ * Matches a simple semver range, where the version number could be an npm tag.
+ */
+const SEMVER_RANGE = /^(~|\^|=|<|>|<=|>=)?([\w\-.]*)$/;
+
+/**
+ * Get the specifier we should use
+ *
+ * @param currentSpecifier - The current package version.
+ * @param suggestedSpecifier - The package version we would like to use.
+ *
+ * #### Notes
+ * If the suggested specifier is not a valid range, we assume it is of the
+ * form ${RANGE}${TAG}, where TAG is an npm tag (such as 'latest') and RANGE
+ * is either a semver range indicator (one of `~, ^, >, <, =, >=, <=`), or is
+ * not given (in which case the current specifier range prefix is used).
+ */
+async function getSpecifier(
+  currentSpecifier: string,
+  suggestedSpecifier: string
+) {
+  if (semver.validRange(suggestedSpecifier)) {
+    return suggestedSpecifier;
+  }
+
+  // The suggested specifier is not a valid range, so we assume it
+  // references a tag
+  let [, suggestedSigil, suggestedTag] =
+    suggestedSpecifier.match(SEMVER_RANGE) ?? [];
+
+  if (!suggestedTag) {
+    throw Error(`Invalid version specifier: ${suggestedSpecifier}`);
+  }
+
+  // A tag with no sigil adopts the sigil from the current specification
+  if (!suggestedSigil) {
+    const match = currentSpecifier.match(SEMVER_RANGE);
+    if (match === null) {
+      throw Error(
+        `Current version range is not recognized: ${currentSpecifier}`
+      );
+    }
+    suggestedSigil = match[1];
+  }
+  return `${suggestedSigil ?? ''}${suggestedTag}`;
+}
 
 async function getVersion(pkg: string, specifier: string) {
-  let key = JSON.stringify([pkg, specifier]);
+  const key = JSON.stringify([pkg, specifier]);
   if (versionCache.has(key)) {
     return versionCache.get(key);
   }
   if (semver.validRange(specifier) === null) {
     // We have a tag, with possibly a range specifier, such as ^latest
-    let match = specifier.match(tags);
+    const match = specifier.match(SEMVER_RANGE);
     if (match === null) {
       throw Error(`Invalid version specifier: ${specifier}`);
     }
 
     // Look up the actual version corresponding to the tag
-    let { version } = await packageJson(pkg, { version: match[2] });
-    specifier = match[1] + version;
+    const { version } = await packageJson(pkg, { version: match[2] });
+    specifier = `${match[1] ?? ''}${version}`;
+    if (semver.validRange(specifier) === null) {
+      throw Error(
+        `Could not find valid version range for ${pkg}: ${specifier}`
+      );
+    }
   }
   versionCache.set(key, specifier);
   return specifier;
@@ -44,12 +95,12 @@ async function getVersion(pkg: string, specifier: string) {
  */
 function subset(range1: string, range2: string): boolean {
   try {
-    const [, r1, version1] = range1.match(tags);
-    const [, r2] = range2.match(tags);
+    const [, r1, version1] = range1.match(SEMVER_RANGE) ?? [];
+    const [, r2] = range2.match(SEMVER_RANGE) ?? [];
     return (
-      ['', '~', '^'].indexOf(r1) >= 0 &&
+      ['', '>=', '=', '~', '^'].includes(r1) &&
       r1 === r2 &&
-      semver.valid(version1) &&
+      !!semver.valid(version1) &&
       semver.satisfies(version1, range2)
     );
   } catch (e) {
@@ -60,13 +111,15 @@ function subset(range1: string, range2: string): boolean {
 async function handleDependency(
   dependencies: { [key: string]: string },
   dep: string,
-  specifier: string,
+  suggestedSpecifier: string,
   minimal: boolean
 ): Promise<{ updated: boolean; log: string[] }> {
-  let log = [];
+  const log = [];
   let updated = false;
-  let newRange = await getVersion(dep, specifier);
-  let oldRange = dependencies[dep];
+  const oldRange = dependencies[dep];
+  const specifier = await getSpecifier(oldRange, suggestedSpecifier);
+  const newRange = await getVersion(dep, specifier);
+
   if (minimal && subset(newRange, oldRange)) {
     log.push(`SKIPPING ${dep} ${oldRange} -> ${newRange}`);
   } else {
@@ -88,7 +141,7 @@ async function handlePackage(
   minimal = false
 ) {
   let fileUpdated = false;
-  let fileLog: string[] = [];
+  const fileLog: string[] = [];
 
   // Read in the package.json.
   packagePath = path.join(packagePath, 'package.json');
@@ -96,17 +149,17 @@ async function handlePackage(
   try {
     data = utils.readJSONFile(packagePath);
   } catch (e) {
-    console.log('Skipping package ' + packagePath);
+    console.debug('Skipping package ' + packagePath);
     return;
   }
 
   // Update dependencies as appropriate.
-  for (let dtype of ['dependencies', 'devDependencies']) {
-    let deps = data[dtype] || {};
+  for (const dtype of ['dependencies', 'devDependencies']) {
+    const deps = data[dtype] || {};
     if (typeof name === 'string') {
-      let dep = name;
+      const dep = name;
       if (dep in deps) {
-        let { updated, log } = await handleDependency(
+        const { updated, log } = await handleDependency(
           deps,
           dep,
           specifier,
@@ -118,11 +171,11 @@ async function handlePackage(
         fileLog.push(...log);
       }
     } else {
-      let keys = Object.keys(deps);
+      const keys = Object.keys(deps);
       keys.sort();
-      for (let dep of keys) {
+      for (const dep of keys) {
         if (dep.match(name)) {
-          let { updated, log } = await handleDependency(
+          const { updated, log } = await handleDependency(
             deps,
             dep,
             specifier,
@@ -138,9 +191,9 @@ async function handlePackage(
   }
 
   if (fileLog.length > 0) {
-    console.log(packagePath);
-    console.log(fileLog.join('\n'));
-    console.log();
+    console.debug(packagePath);
+    console.debug(fileLog.join('\n'));
+    console.debug();
   }
 
   // Write the file back to disk.
@@ -160,15 +213,15 @@ commander
   .arguments('<package> [versionspec]')
   .action(
     async (name: string | RegExp, version: string = '^latest', args: any) => {
-      let basePath = path.resolve(args.path || '.');
-      let pkg = args.regex ? new RegExp(name) : name;
+      const basePath = path.resolve(args.path || '.');
+      const pkg = args.regex ? new RegExp(name) : name;
 
       if (args.lerna) {
-        let paths = utils.getLernaPaths(basePath).sort();
+        const paths = utils.getLernaPaths(basePath).sort();
 
         // We use a loop instead of Promise.all so that the output is in
         // alphabetical order.
-        for (let pkgPath of paths) {
+        for (const pkgPath of paths) {
           await handlePackage(pkg, version, pkgPath, args.dryRun, args.minimal);
         }
       }
@@ -176,8 +229,8 @@ commander
     }
   );
 
-commander.on('--help', function() {
-  console.log(`
+commander.on('--help', function () {
+  console.debug(`
 Examples
 --------
 
@@ -189,6 +242,12 @@ Examples
   Only update if the update is substantial:
 
       update-dependency --minimal --regex '.*' ^latest
+
+  Update all packages, that does not start with '@jupyterlab',
+  to the latest version and use the same version specifier currently
+  being used
+
+      update:dependency --regex '^(?!@jupyterlab).*' latest --dry-run
 
   Print the log of the above without actually making any changes.
 

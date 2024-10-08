@@ -2,52 +2,68 @@
 // Distributed under the terms of the Modified BSD License.
 
 import { PageConfig, URLExt } from '@jupyterlab/coreutils';
-// @ts-ignore
-__webpack_public_path__ = URLExt.join(PageConfig.getBaseUrl(), 'example/');
+(window as any).__webpack_public_path__ = URLExt.join(
+  PageConfig.getBaseUrl(),
+  'example/'
+);
 
-import '@jupyterlab/application/style/index.css';
-import '@jupyterlab/codemirror/style/index.css';
-import '@jupyterlab/filebrowser/style/index.css';
-import '@jupyterlab/theme-light-extension/style/index.css';
-import '../index.css';
+// Import style through JS file to deduplicate them.
+import './style';
 
-import { each } from '@phosphor/algorithm';
+import { CommandRegistry } from '@lumino/commands';
 
-import { CommandRegistry } from '@phosphor/commands';
-
-import { DockPanel, Menu, SplitPanel, Widget } from '@phosphor/widgets';
+import { DockPanel, Menu, SplitPanel, Widget } from '@lumino/widgets';
 
 import { ServiceManager } from '@jupyterlab/services';
 
-import { Dialog, ToolbarButton, showDialog } from '@jupyterlab/apputils';
+import { Dialog, showDialog } from '@jupyterlab/apputils';
 
 import {
   CodeMirrorEditorFactory,
-  CodeMirrorMimeTypeService
+  CodeMirrorMimeTypeService,
+  EditorLanguageRegistry
 } from '@jupyterlab/codemirror';
 
 import { DocumentManager } from '@jupyterlab/docmanager';
 
 import { DocumentRegistry } from '@jupyterlab/docregistry';
 
-import { FileBrowser, FileBrowserModel } from '@jupyterlab/filebrowser';
+import { FileBrowser, FilterFileBrowserModel } from '@jupyterlab/filebrowser';
 
 import { FileEditorFactory } from '@jupyterlab/fileeditor';
 
-import { defaultIconRegistry } from '@jupyterlab/ui-components';
+import {
+  ITranslator,
+  nullTranslator,
+  TranslationManager
+} from '@jupyterlab/translation';
 
-function main(): void {
-  let manager = new ServiceManager();
+import { addIcon, ToolbarButton } from '@jupyterlab/ui-components';
+
+const LANG = 'en';
+
+async function main(): Promise<void> {
+  // init translator
+  const translator = new TranslationManager();
+  await translator.fetch(LANG);
+
+  const manager = new ServiceManager();
   void manager.ready.then(() => {
-    createApp(manager);
+    createApp(manager, translator);
   });
 }
 
-function createApp(manager: ServiceManager.IManager): void {
-  let widgets: Widget[] = [];
+function createApp(
+  manager: ServiceManager.IManager,
+  translator?: ITranslator
+): void {
+  translator = translator || nullTranslator;
+  const trans = translator.load('jupyterlab');
+
+  const widgets: Widget[] = [];
   let activeWidget: Widget;
 
-  let opener = {
+  const opener = {
     open: (widget: Widget) => {
       if (widgets.indexOf(widget) === -1) {
         dock.addWidget(widget, { mode: 'tab-after' });
@@ -56,26 +72,57 @@ function createApp(manager: ServiceManager.IManager): void {
       dock.activateWidget(widget);
       activeWidget = widget;
       widget.disposed.connect((w: Widget) => {
-        let index = widgets.indexOf(w);
+        const index = widgets.indexOf(w);
         widgets.splice(index, 1);
       });
+    },
+    get opened() {
+      return {
+        connect: () => {
+          return false;
+        },
+        disconnect: () => {
+          return false;
+        }
+      };
     }
   };
 
-  let docRegistry = new DocumentRegistry();
-  let docManager = new DocumentManager({
+  const docRegistry = new DocumentRegistry();
+  const docManager = new DocumentManager({
     registry: docRegistry,
     manager,
     opener
   });
-  let editorServices = {
-    factoryService: new CodeMirrorEditorFactory(),
-    mimeTypeService: new CodeMirrorMimeTypeService()
+  const languages = new EditorLanguageRegistry();
+  EditorLanguageRegistry.getDefaultLanguages()
+    .filter(language =>
+      ['ipython', 'julia', 'python'].includes(language.name.toLowerCase())
+    )
+    .forEach(language => {
+      languages.addLanguage(language);
+    });
+  // Language for Markdown cells
+  languages.addLanguage({
+    name: 'ipythongfm',
+    mime: 'text/x-ipythongfm',
+    load: async () => {
+      const m = await import('@codemirror/lang-markdown');
+      return m.markdown({
+        codeLanguages: (info: string) => languages.findBest(info) as any
+      });
+    }
+  });
+  const factoryService = new CodeMirrorEditorFactory({ languages });
+  const mimeTypeService = new CodeMirrorMimeTypeService(languages);
+  const editorServices = {
+    factoryService,
+    mimeTypeService
   };
-  let wFactory = new FileEditorFactory({
+  const wFactory = new FileEditorFactory({
     editorServices,
     factoryOptions: {
-      name: 'Editor',
+      name: trans.__('Editor'),
       modelName: 'text',
       fileTypes: ['*'],
       defaultFor: ['*'],
@@ -85,20 +132,19 @@ function createApp(manager: ServiceManager.IManager): void {
   });
   docRegistry.addWidgetFactory(wFactory);
 
-  let commands = new CommandRegistry();
+  const commands = new CommandRegistry();
 
-  let fbModel = new FileBrowserModel({
-    manager: docManager,
-    iconRegistry: defaultIconRegistry
+  const fbModel = new FilterFileBrowserModel({
+    manager: docManager
   });
-  let fbWidget = new FileBrowser({
+  const fbWidget = new FileBrowser({
     id: 'filebrowser',
     model: fbModel
   });
 
   // Add a creator toolbar item.
-  let creator = new ToolbarButton({
-    iconClassName: 'jp-AddIcon jp-Icon jp-Icon-16',
+  const creator = new ToolbarButton({
+    icon: addIcon,
     onClick: () => {
       void docManager
         .newUntitled({
@@ -112,18 +158,18 @@ function createApp(manager: ServiceManager.IManager): void {
   });
   fbWidget.toolbar.insertItem(0, 'create', creator);
 
-  let panel = new SplitPanel();
+  const panel = new SplitPanel();
   panel.id = 'main';
   panel.addWidget(fbWidget);
   SplitPanel.setStretch(fbWidget, 0);
-  let dock = new DockPanel();
+  const dock = new DockPanel();
   panel.addWidget(dock);
   SplitPanel.setStretch(dock, 1);
   dock.spacing = 8;
 
   document.addEventListener('focus', event => {
     for (let i = 0; i < widgets.length; i++) {
-      let widget = widgets[i];
+      const widget = widgets[i];
       if (widget.node.contains(event.target as HTMLElement)) {
         activeWidget = widget;
         break;
@@ -133,18 +179,18 @@ function createApp(manager: ServiceManager.IManager): void {
 
   // Add commands.
   commands.addCommand('file-open', {
-    label: 'Open',
-    icon: 'fa fa-folder-open-o',
+    label: trans.__('Open'),
+    iconClass: 'fa fa-folder-open-o',
     mnemonic: 0,
     execute: () => {
-      each(fbWidget.selectedItems(), item => {
+      for (const item of fbWidget.selectedItems()) {
         docManager.openOrReveal(item.path);
-      });
+      }
     }
   });
   commands.addCommand('file-rename', {
-    label: 'Rename',
-    icon: 'fa fa-edit',
+    label: trans.__('Rename'),
+    iconClass: 'fa fa-edit',
     mnemonic: 0,
     execute: () => {
       return fbWidget.rename();
@@ -152,73 +198,73 @@ function createApp(manager: ServiceManager.IManager): void {
   });
   commands.addCommand('file-save', {
     execute: () => {
-      let context = docManager.contextForWidget(activeWidget);
-      return context.save();
+      const context = docManager.contextForWidget(activeWidget);
+      return context?.save();
     }
   });
   commands.addCommand('file-cut', {
-    label: 'Cut',
-    icon: 'fa fa-cut',
+    label: trans.__('Cut'),
+    iconClass: 'fa fa-cut',
     execute: () => {
       fbWidget.cut();
     }
   });
   commands.addCommand('file-copy', {
-    label: 'Copy',
-    icon: 'fa fa-copy',
+    label: trans.__('Copy'),
+    iconClass: 'fa fa-copy',
     mnemonic: 0,
     execute: () => {
       fbWidget.copy();
     }
   });
   commands.addCommand('file-delete', {
-    label: 'Delete',
-    icon: 'fa fa-remove',
+    label: trans.__('Delete'),
+    iconClass: 'fa fa-remove',
     mnemonic: 0,
     execute: () => {
       return fbWidget.delete();
     }
   });
   commands.addCommand('file-duplicate', {
-    label: 'Duplicate',
-    icon: 'fa fa-copy',
+    label: trans.__('Duplicate'),
+    iconClass: 'fa fa-copy',
     mnemonic: 0,
     execute: () => {
       return fbWidget.duplicate();
     }
   });
   commands.addCommand('file-paste', {
-    label: 'Paste',
-    icon: 'fa fa-paste',
+    label: trans.__('Paste'),
+    iconClass: 'fa fa-paste',
     mnemonic: 0,
     execute: () => {
       return fbWidget.paste();
     }
   });
   commands.addCommand('file-download', {
-    label: 'Download',
-    icon: 'fa fa-download',
+    label: trans.__('Download'),
+    iconClass: 'fa fa-download',
     execute: () => {
       return fbWidget.download();
     }
   });
   commands.addCommand('file-shutdown-kernel', {
-    label: 'Shut Down Kernel',
-    icon: 'fa fa-stop-circle-o',
+    label: trans.__('Shut Down Kernel'),
+    iconClass: 'fa fa-stop-circle-o',
     execute: () => {
       return fbWidget.shutdownKernels();
     }
   });
   commands.addCommand('file-dialog-demo', {
-    label: 'Dialog Demo',
+    label: trans.__('Dialog Demo'),
     execute: () => {
       dialogDemo();
     }
   });
   commands.addCommand('file-info-demo', {
-    label: 'Info Demo',
+    label: trans.__('Info Demo'),
     execute: () => {
-      let msg = 'The quick brown fox jumped over the lazy dog';
+      const msg = 'The quick brown fox jumped over the lazy dog';
       void showDialog({
         title: 'Cool Title',
         body: msg,
@@ -242,7 +288,7 @@ function createApp(manager: ServiceManager.IManager): void {
   });
 
   // Create a context menu.
-  let menu = new Menu({ commands });
+  const menu = new Menu({ commands });
   menu.addItem({ command: 'file-open' });
   menu.addItem({ command: 'file-rename' });
   menu.addItem({ command: 'file-remove' });
@@ -256,13 +302,19 @@ function createApp(manager: ServiceManager.IManager): void {
   menu.addItem({ command: 'file-info-demo' });
 
   // Add a context menu to the dir listing.
-  let node = fbWidget.node.getElementsByClassName('jp-DirListing-content')[0];
+  const node = fbWidget.node.getElementsByClassName('jp-DirListing-content')[0];
   node.addEventListener('contextmenu', (event: MouseEvent) => {
     event.preventDefault();
-    let x = event.clientX;
-    let y = event.clientY;
+    const x = event.clientX;
+    const y = event.clientY;
     menu.open(x, y);
   });
+
+  // Ensure Jupyter styling
+  panel.addClass('jp-ThemedContainer');
+  menu.addClass('jp-ThemedContainer');
+  // [optional] Enforce Jupyter styling on the full page
+  document.body.classList.add('jp-ThemedContainer');
 
   // Attach the panel to the DOM.
   Widget.attach(panel, document.body);
@@ -272,22 +324,22 @@ function createApp(manager: ServiceManager.IManager): void {
     panel.update();
   });
 
-  console.log('Example started!');
+  console.debug('Example started!');
 }
 
 /**
  * Create a non-functional dialog demo.
  */
 function dialogDemo(): void {
-  let body = document.createElement('div');
-  let input = document.createElement('input');
+  const body = document.createElement('div');
+  const input = document.createElement('input');
   input.value = 'Untitled.ipynb';
-  let selector = document.createElement('select');
-  let option0 = document.createElement('option');
+  const selector = document.createElement('select');
+  const option0 = document.createElement('option');
   option0.value = 'python';
   option0.text = 'Python 3';
   selector.appendChild(option0);
-  let option1 = document.createElement('option');
+  const option1 = document.createElement('option');
   option1.value = 'julia';
   option1.text = 'Julia';
   selector.appendChild(option1);

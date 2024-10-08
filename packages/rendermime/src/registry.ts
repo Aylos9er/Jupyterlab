@@ -1,23 +1,14 @@
-/*-----------------------------------------------------------------------------
+/* -----------------------------------------------------------------------------
 | Copyright (c) Jupyter Development Team.
 | Distributed under the terms of the Modified BSD License.
 |----------------------------------------------------------------------------*/
-import { Contents, Session } from '@jupyterlab/services';
-
+import { Sanitizer } from '@jupyterlab/apputils';
+import { PageConfig, PathExt, URLExt } from '@jupyterlab/coreutils';
 import { IRenderMime } from '@jupyterlab/rendermime-interfaces';
-
-import { PathExt, URLExt } from '@jupyterlab/coreutils';
-
-import {
-  IClientSession,
-  ISanitizer,
-  defaultSanitizer
-} from '@jupyterlab/apputils';
-
-import { ReadonlyJSONObject } from '@phosphor/coreutils';
-
+import { Contents } from '@jupyterlab/services';
+import { ITranslator, nullTranslator } from '@jupyterlab/translation';
+import { ReadonlyPartialJSONObject } from '@lumino/coreutils';
 import { MimeModel } from './mimemodel';
-
 import { IRenderMimeRegistry } from './tokens';
 
 /**
@@ -38,14 +29,16 @@ export class RenderMimeRegistry implements IRenderMimeRegistry {
    */
   constructor(options: RenderMimeRegistry.IOptions = {}) {
     // Parse the options.
-    this.resolver = options.resolver || null;
-    this.linkHandler = options.linkHandler || null;
-    this.latexTypesetter = options.latexTypesetter || null;
-    this.sanitizer = options.sanitizer || defaultSanitizer;
+    this.translator = options.translator ?? nullTranslator;
+    this.resolver = options.resolver ?? null;
+    this.linkHandler = options.linkHandler ?? null;
+    this.latexTypesetter = options.latexTypesetter ?? null;
+    this.markdownParser = options.markdownParser ?? null;
+    this.sanitizer = options.sanitizer ?? new Sanitizer();
 
     // Add the initial factories.
     if (options.initialFactories) {
-      for (let factory of options.initialFactories) {
+      for (const factory of options.initialFactories) {
         this.addFactory(factory);
       }
     }
@@ -54,7 +47,7 @@ export class RenderMimeRegistry implements IRenderMimeRegistry {
   /**
    * The sanitizer used by the rendermime instance.
    */
-  readonly sanitizer: ISanitizer;
+  readonly sanitizer: IRenderMime.ISanitizer;
 
   /**
    * The object used to resolve relative urls for the rendermime instance.
@@ -70,6 +63,16 @@ export class RenderMimeRegistry implements IRenderMimeRegistry {
    * The LaTeX typesetter for the rendermime.
    */
   readonly latexTypesetter: IRenderMime.ILatexTypesetter | null;
+
+  /**
+   * The Markdown parser for the rendermime.
+   */
+  readonly markdownParser: IRenderMime.IMarkdownParser | null;
+
+  /**
+   * The application language translator.
+   */
+  readonly translator: ITranslator;
 
   /**
    * The ordered list of mimeTypes.
@@ -92,12 +95,12 @@ export class RenderMimeRegistry implements IRenderMimeRegistry {
    *   or `undefined` if the mime type cannot be rendered.
    */
   preferredMimeType(
-    bundle: ReadonlyJSONObject,
+    bundle: ReadonlyPartialJSONObject,
     safe: 'ensure' | 'prefer' | 'any' = 'ensure'
   ): string | undefined {
     // Try to find a safe factory first, if preferred.
     if (safe === 'ensure' || safe === 'prefer') {
-      for (let mt of this.mimeTypes) {
+      for (const mt of this.mimeTypes) {
         if (mt in bundle && this._factories[mt].safe) {
           return mt;
         }
@@ -106,7 +109,7 @@ export class RenderMimeRegistry implements IRenderMimeRegistry {
 
     if (safe !== 'ensure') {
       // Otherwise, search for the best factory among all factories.
-      for (let mt of this.mimeTypes) {
+      for (const mt of this.mimeTypes) {
         if (mt in bundle) {
           return mt;
         }
@@ -138,7 +141,9 @@ export class RenderMimeRegistry implements IRenderMimeRegistry {
       resolver: this.resolver,
       sanitizer: this.sanitizer,
       linkHandler: this.linkHandler,
-      latexTypesetter: this.latexTypesetter
+      latexTypesetter: this.latexTypesetter,
+      markdownParser: this.markdownParser,
+      translator: this.translator
     });
   }
 
@@ -162,11 +167,15 @@ export class RenderMimeRegistry implements IRenderMimeRegistry {
    */
   clone(options: IRenderMimeRegistry.ICloneOptions = {}): RenderMimeRegistry {
     // Create the clone.
-    let clone = new RenderMimeRegistry({
-      resolver: options.resolver || this.resolver || undefined,
-      sanitizer: options.sanitizer || this.sanitizer || undefined,
-      linkHandler: options.linkHandler || this.linkHandler || undefined,
-      latexTypesetter: options.latexTypesetter || this.latexTypesetter
+    const clone = new RenderMimeRegistry({
+      resolver: options.resolver ?? this.resolver ?? undefined,
+      sanitizer: options.sanitizer ?? this.sanitizer ?? undefined,
+      linkHandler: options.linkHandler ?? this.linkHandler ?? undefined,
+      latexTypesetter:
+        options.latexTypesetter ?? this.latexTypesetter ?? undefined,
+      markdownParser:
+        options.markdownParser ?? this.markdownParser ?? undefined,
+      translator: this.translator
     });
 
     // Clone the internal state.
@@ -210,7 +219,7 @@ export class RenderMimeRegistry implements IRenderMimeRegistry {
         rank = 100;
       }
     }
-    for (let mt of factory.mimeTypes) {
+    for (const mt of factory.mimeTypes) {
       this._factories[mt] = factory;
       this._ranks[mt] = { rank, id: this._id++ };
     }
@@ -236,7 +245,7 @@ export class RenderMimeRegistry implements IRenderMimeRegistry {
    * @returns The rank of the mime type or undefined.
    */
   getRank(mimeType: string): number | undefined {
-    let rank = this._ranks[mimeType];
+    const rank = this._ranks[mimeType];
     return rank && rank.rank;
   }
 
@@ -254,7 +263,7 @@ export class RenderMimeRegistry implements IRenderMimeRegistry {
     if (!this._ranks[mimeType]) {
       return;
     }
-    let id = this._id++;
+    const id = this._id++;
     this._ranks[mimeType] = { rank, id };
     this._types = null;
   }
@@ -301,48 +310,70 @@ export namespace RenderMimeRegistry {
      * An optional LaTeX typesetter.
      */
     latexTypesetter?: IRenderMime.ILatexTypesetter;
+
+    /**
+     * An optional Markdown parser.
+     */
+    markdownParser?: IRenderMime.IMarkdownParser;
+
+    /**
+     * The application language translator.
+     */
+    translator?: ITranslator;
   }
 
   /**
-   * A default resolver that uses a session and a contents manager.
+   * A default resolver that uses a given reference path and a contents manager.
    */
   export class UrlResolver implements IRenderMime.IResolver {
     /**
-     * Create a new url resolver for a console.
+     * Create a new url resolver.
      */
     constructor(options: IUrlResolverOptions) {
-      this._session = options.session;
+      this._path = options.path;
       this._contents = options.contents;
+    }
+
+    /**
+     * The path of the object, from which local urls can be derived.
+     */
+    get path(): string {
+      return this._path;
+    }
+    set path(value: string) {
+      this._path = value;
     }
 
     /**
      * Resolve a relative url to an absolute url path.
      */
-    resolveUrl(url: string): Promise<string> {
+    async resolveUrl(url: string): Promise<string> {
       if (this.isLocal(url)) {
-        const cwd = encodeURI(PathExt.dirname(this._session.path));
+        const cwd = encodeURI(PathExt.dirname(this.path));
         url = PathExt.resolve(cwd, url);
       }
-      return Promise.resolve(url);
+      return url;
     }
 
     /**
      * Get the download url of a given absolute url path.
      *
      * #### Notes
-     * This URL may include a query parameter.
+     * The returned URL may include a query parameter.
      */
-    getDownloadUrl(url: string): Promise<string> {
-      if (this.isLocal(url)) {
+    async getDownloadUrl(urlPath: string): Promise<string> {
+      if (this.isLocal(urlPath)) {
         // decode url->path before passing to contents api
-        return this._contents.getDownloadUrl(decodeURI(url));
+        return this._contents.getDownloadUrl(decodeURIComponent(urlPath));
       }
-      return Promise.resolve(url);
+      return urlPath;
     }
 
     /**
      * Whether the URL should be handled by the resolver
      * or not.
+     *
+     * @param allowRoot - Whether the paths starting at Unix-style filesystem root (`/`) are permitted.
      *
      * #### Notes
      * This is similar to the `isLocal` check in `URLExt`,
@@ -350,12 +381,79 @@ export namespace RenderMimeRegistry {
      * of the `IDrive`s that may be registered with the contents
      * manager.
      */
-    isLocal(url: string): boolean {
-      const path = decodeURI(url);
-      return URLExt.isLocal(url) || !!this._contents.driveName(path);
+    isLocal(url: string, allowRoot: boolean = false): boolean {
+      if (this.isMalformed(url)) {
+        return false;
+      }
+      return (
+        URLExt.isLocal(url, allowRoot) ||
+        !!this._contents.driveName(decodeURI(url))
+      );
     }
 
-    private _session: Session.ISession | IClientSession;
+    /**
+     * Resolve a path from Jupyter kernel to a path:
+     * - relative to `root_dir` (preferrably) this is in jupyter-server scope,
+     * - path understood and known by kernel (if such a path exists).
+     * Returns `null` if there is no file matching provided path in neither
+     * kernel nor jupyter-server contents manager.
+     */
+    async resolvePath(
+      path: string
+    ): Promise<IRenderMime.IResolvedLocation | null> {
+      // TODO: a clean implementation would be server-side and depends on:
+      // https://github.com/jupyter-server/jupyter_server/issues/1280
+
+      const rootDir = PageConfig.getOption('rootUri').replace('file://', '');
+      // Workaround: expand `~` path using root dir (if it matches).
+      if (path.startsWith('~/') && rootDir.startsWith('/home/')) {
+        // For now we assume that kernel is in root dir.
+        path = rootDir.split('/').slice(0, 3).join('/') + path.substring(1);
+      }
+      if (path.startsWith(rootDir) || path.startsWith('./')) {
+        try {
+          const relativePath = path.replace(rootDir, '');
+          // If file exists on the server we have guessed right
+          const response = await this._contents.get(relativePath, {
+            content: false
+          });
+          return {
+            path: response.path,
+            scope: 'server'
+          };
+        } catch (error) {
+          // The file seems like should be on the server but is not.
+          console.warn(`Could not resolve location of ${path} on server`);
+          return null;
+        }
+      }
+      // The file is not accessible from jupyter-server but maybe it is
+      // available from DAP `source`; we assume the path is available
+      // from kernel because currently we have no way of checking this
+      // without introducing a cycle (unless we were to set the debugger
+      // service instance on the resolver later).
+      return {
+        path: path,
+        scope: 'kernel'
+      };
+    }
+
+    /**
+     * Whether the URL can be decoded using `decodeURI`.
+     */
+    isMalformed(url: string): boolean {
+      try {
+        decodeURI(url);
+        return false;
+      } catch (error: unknown) {
+        if (error instanceof URIError) {
+          return true;
+        }
+        throw error;
+      }
+    }
+
+    private _path: string;
     private _contents: Contents.IManager;
   }
 
@@ -364,9 +462,12 @@ export namespace RenderMimeRegistry {
    */
   export interface IUrlResolverOptions {
     /**
-     * The session used by the resolver.
+     * The path providing context for local urls.
+     *
+     * #### Notes
+     * Either session or path must be given, and path takes precedence.
      */
-    session: Session.ISession | IClientSession;
+    path: string;
 
     /**
      * The contents manager used by the resolver.
@@ -399,8 +500,8 @@ namespace Private {
    */
   export function sortedTypes(map: RankMap): string[] {
     return Object.keys(map).sort((a, b) => {
-      let p1 = map[a];
-      let p2 = map[b];
+      const p1 = map[a];
+      const p2 = map[b];
       if (p1.rank !== p2.rank) {
         return p1.rank - p2.rank;
       }

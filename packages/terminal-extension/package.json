@@ -1,6 +1,6 @@
 {
   "name": "@jupyterlab/terminal-extension",
-  "version": "2.0.0-alpha.1",
+  "version": "4.3.0-beta.1",
   "description": "JupyterLab - Terminal Emulator Extension",
   "homepage": "https://github.com/jupyterlab/jupyterlab",
   "bugs": {
@@ -12,15 +12,9 @@
   },
   "license": "BSD-3-Clause",
   "author": "Project Jupyter",
-  "files": [
-    "lib/*.d.ts",
-    "lib/*.js.map",
-    "lib/*.js",
-    "schema/*.json",
-    "style/**/*.css"
-  ],
   "sideEffects": [
-    "style/**/*.css"
+    "style/**/*.css",
+    "style/index.js"
   ],
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -28,30 +22,37 @@
   "directories": {
     "lib": "lib/"
   },
+  "files": [
+    "lib/*.d.ts",
+    "lib/*.js.map",
+    "lib/*.js",
+    "schema/*.json",
+    "style/**/*.css",
+    "style/index.js",
+    "src/**/*.{ts,tsx}"
+  ],
   "scripts": {
     "build": "tsc -b",
-    "clean": "rimraf lib",
-    "docs": "typedoc --options tdoptions.json --theme ../../typedoc-theme src",
-    "prepublishOnly": "npm run build",
+    "clean": "rimraf lib && rimraf tsconfig.tsbuildinfo",
     "watch": "tsc -b --watch"
   },
   "dependencies": {
-    "@jupyterlab/application": "^2.0.0-alpha.1",
-    "@jupyterlab/apputils": "^2.0.0-alpha.1",
-    "@jupyterlab/coreutils": "^4.0.0-alpha.1",
-    "@jupyterlab/launcher": "^2.0.0-alpha.1",
-    "@jupyterlab/mainmenu": "^2.0.0-alpha.1",
-    "@jupyterlab/running": "^2.0.0-alpha.1",
-    "@jupyterlab/services": "^5.0.0-alpha.1",
-    "@jupyterlab/terminal": "^2.0.0-alpha.1",
-    "@phosphor/algorithm": "^1.2.0",
-    "@phosphor/widgets": "^1.9.0"
+    "@jupyterlab/application": "^4.3.0-beta.1",
+    "@jupyterlab/apputils": "^4.4.0-beta.1",
+    "@jupyterlab/launcher": "^4.3.0-beta.1",
+    "@jupyterlab/mainmenu": "^4.3.0-beta.1",
+    "@jupyterlab/running": "^4.3.0-beta.1",
+    "@jupyterlab/services": "^7.3.0-beta.1",
+    "@jupyterlab/settingregistry": "^4.3.0-beta.1",
+    "@jupyterlab/terminal": "^4.3.0-beta.1",
+    "@jupyterlab/translation": "^4.3.0-beta.1",
+    "@jupyterlab/ui-components": "^4.3.0-beta.1",
+    "@lumino/widgets": "^2.3.2"
   },
   "devDependencies": {
-    "@types/webpack-env": "^1.13.9",
-    "rimraf": "~2.6.2",
-    "typedoc": "^0.14.2",
-    "typescript": "~3.5.1"
+    "@types/webpack-env": "^1.18.0",
+    "rimraf": "~5.0.5",
+    "typescript": "~5.1.6"
   },
   "publishConfig": {
     "access": "public"
@@ -59,5 +60,6 @@
   "jupyterlab": {
     "extension": true,
     "schemaDir": "schema"
-  }
+  },
+  "styleModule": "style/index.js"
 }

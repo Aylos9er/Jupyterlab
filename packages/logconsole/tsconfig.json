@@ -10,6 +10,9 @@
       "path": "../coreutils"
     },
     {
+      "path": "../nbformat"
+    },
+    {
       "path": "../outputarea"
     },
     {
@@ -17,6 +20,9 @@
     },
     {
       "path": "../services"
+    },
+    {
+      "path": "../translation"
     }
   ]
 }

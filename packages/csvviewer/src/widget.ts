@@ -2,25 +2,19 @@
 // Distributed under the terms of the Modified BSD License.
 
 import { ActivityMonitor } from '@jupyterlab/coreutils';
-
 import {
   ABCWidgetFactory,
   DocumentRegistry,
-  IDocumentWidget,
-  DocumentWidget
+  DocumentWidget,
+  IDocumentWidget
 } from '@jupyterlab/docregistry';
-
-import { PromiseDelegate } from '@phosphor/coreutils';
-
-import { DataGrid, TextRenderer, CellRenderer } from '@phosphor/datagrid';
-
-import { Message } from '@phosphor/messaging';
-
-import { PanelLayout, Widget } from '@phosphor/widgets';
-
+import { PromiseDelegate } from '@lumino/coreutils';
+import type * as DataGridModule from '@lumino/datagrid';
+import { Message } from '@lumino/messaging';
+import { ISignal, Signal } from '@lumino/signaling';
+import { PanelLayout, Widget } from '@lumino/widgets';
+import type * as DSVModelModule from './model';
 import { CSVDelimiter } from './toolbar';
-
-import { DSVModel } from './model';
 
 /**
  * The class name added to a CSV viewer.
@@ -56,7 +50,7 @@ export class TextRenderConfig {
   /**
    * horizontalAlignment of the text
    */
-  horizontalAlignment: TextRenderer.HorizontalAlignment;
+  horizontalAlignment: DataGridModule.TextRenderer.HorizontalAlignment;
 }
 
 /**
@@ -66,11 +60,18 @@ export class TextRenderConfig {
  * to set the background color of cells matching the search text.
  */
 export class GridSearchService {
-  constructor(grid: DataGrid) {
+  constructor(grid: DataGridModule.DataGrid) {
     this._grid = grid;
     this._query = null;
     this._row = 0;
     this._column = -1;
+  }
+
+  /**
+   * A signal fired when the grid changes.
+   */
+  get changed(): ISignal<GridSearchService, void> {
+    return this._changed;
   }
 
   /**
@@ -80,7 +81,7 @@ export class GridSearchService {
    */
   cellBackgroundColorRendererFunc(
     config: TextRenderConfig
-  ): CellRenderer.ConfigFunc<string> {
+  ): DataGridModule.CellRenderer.ConfigFunc<string> {
     return ({ value, row, column }) => {
       if (this._query) {
         if ((value as string).match(this._query)) {
@@ -90,24 +91,25 @@ export class GridSearchService {
           return config.matchBackgroundColor;
         }
       }
+      return '';
     };
   }
 
   /**
    * Clear the search.
    */
-  clear() {
+  clear(): void {
     this._query = null;
     this._row = 0;
     this._column = -1;
-    this._grid.repaint();
+    this._changed.emit(undefined);
   }
 
   /**
    * incrementally look for searchText.
    */
   find(query: RegExp, reverse = false): boolean {
-    const model = this._grid.model;
+    const model = this._grid.dataModel!;
     const rowCount = model.rowCount('body');
     const columnCount = model.columnCount('body');
 
@@ -119,12 +121,16 @@ export class GridSearchService {
     this._query = query;
 
     // check if the match is in current viewport
-    const minRow = this._grid.scrollY / this._grid.baseRowSize;
+
+    const minRow = this._grid.scrollY / this._grid.defaultSizes.rowHeight;
     const maxRow =
-      (this._grid.scrollY + this._grid.pageHeight) / this._grid.baseRowSize;
-    const minColumn = this._grid.scrollX / this._grid.baseColumnSize;
+      (this._grid.scrollY + this._grid.pageHeight) /
+      this._grid.defaultSizes.rowHeight;
+    const minColumn =
+      this._grid.scrollX / this._grid.defaultSizes.columnHeaderHeight;
     const maxColumn =
-      (this._grid.scrollX + this._grid.pageWidth) / this._grid.baseColumnSize;
+      (this._grid.scrollX + this._grid.pageWidth) /
+      this._grid.defaultSizes.columnHeaderHeight;
     const isInViewport = (row: number, column: number) => {
       return (
         row >= minRow &&
@@ -152,20 +158,10 @@ export class GridSearchService {
 
           // TODO: we only really need to invalidate the previous and current
           // cell rects, not the entire grid.
-          this._grid.repaint();
+          this._changed.emit(undefined);
 
           if (!isInViewport(row, col)) {
-            // scroll the matching cell into view
-            let scrollX = 0;
-            let scrollY = 0;
-            /* see also https://github.com/jupyterlab/jupyterlab/pull/5523#issuecomment-432621391 */
-            for (let i = 0; i < row - 1; i++) {
-              scrollY += this._grid.sectionSize('row', i);
-            }
-            for (let j = 0; j < col - 1; j++) {
-              scrollX += this._grid.sectionSize('column', j);
-            }
-            this._grid.scrollTo(scrollX, scrollY);
+            this._grid.scrollToRow(row);
           }
           this._row = row;
           this._column = col;
@@ -194,7 +190,7 @@ export class GridSearchService {
    * Wrap indices if needed to just before the start or just after the end.
    */
   private _wrapRows(reverse = false) {
-    const model = this._grid.model;
+    const model = this._grid.dataModel!;
     const rowCount = model.rowCount('body');
     const columnCount = model.columnCount('body');
 
@@ -209,15 +205,16 @@ export class GridSearchService {
     }
   }
 
-  get query(): RegExp {
+  get query(): RegExp | null {
     return this._query;
   }
 
-  private _grid: DataGrid;
+  private _grid: DataGridModule.DataGrid;
   private _query: RegExp | null;
   private _row: number;
   private _column: number;
   private _looping = true;
+  private _changed = new Signal<GridSearchService, void>(this);
 }
 
 /**
@@ -230,33 +227,62 @@ export class CSVViewer extends Widget {
   constructor(options: CSVViewer.IOptions) {
     super();
 
-    let context = (this._context = options.context);
-    let layout = (this.layout = new PanelLayout());
+    this._context = options.context;
+    this.layout = new PanelLayout();
 
     this.addClass(CSV_CLASS);
 
+    this._ready = this.initialize();
+  }
+
+  /**
+   * Promise which resolves when the content is ready.
+   */
+  get ready(): Promise<void> {
+    return this._ready;
+  }
+
+  protected async initialize(): Promise<void> {
+    const layout = this.layout as PanelLayout;
+    if (this.isDisposed || !layout) {
+      return;
+    }
+    const { BasicKeyHandler, BasicMouseHandler, DataGrid } =
+      await Private.ensureDataGrid();
+    this._defaultStyle = DataGrid.defaultStyle;
     this._grid = new DataGrid({
-      baseRowSize: 24,
-      baseColumnSize: 144,
-      baseColumnHeaderSize: 36,
-      baseRowHeaderSize: 64
+      defaultSizes: {
+        rowHeight: 24,
+        columnWidth: 144,
+        rowHeaderWidth: 64,
+        columnHeaderHeight: 36
+      }
     });
     this._grid.addClass(CSV_GRID_CLASS);
     this._grid.headerVisibility = 'all';
+    this._grid.keyHandler = new BasicKeyHandler();
+    this._grid.mouseHandler = new BasicMouseHandler();
+    this._grid.copyConfig = {
+      separator: '\t',
+      format: DataGrid.copyFormatGeneric,
+      headers: 'all',
+      warningThreshold: 1e6
+    };
+
     layout.addWidget(this._grid);
 
     this._searchService = new GridSearchService(this._grid);
+    this._searchService.changed.connect(this._updateRenderer, this);
 
-    void this._context.ready.then(() => {
-      this._updateGrid();
-      this._revealed.resolve(undefined);
-      // Throttle the rendering rate of the widget.
-      this._monitor = new ActivityMonitor({
-        signal: context.model.contentChanged,
-        timeout: RENDER_TIMEOUT
-      });
-      this._monitor.activityStopped.connect(this._updateGrid, this);
+    await this._context.ready;
+    await this._updateGrid();
+    this._revealed.resolve(undefined);
+    // Throttle the rendering rate of the widget.
+    this._monitor = new ActivityMonitor({
+      signal: this._context.model.contentChanged,
+      timeout: RENDER_TIMEOUT
     });
+    this._monitor.activityStopped.connect(this._updateGrid, this);
   }
 
   /**
@@ -269,7 +295,7 @@ export class CSVViewer extends Widget {
   /**
    * A promise that resolves when the csv viewer is ready to be revealed.
    */
-  get revealed() {
+  get revealed(): Promise<void> {
     return this._revealed.promise;
   }
 
@@ -284,30 +310,25 @@ export class CSVViewer extends Widget {
       return;
     }
     this._delimiter = value;
-    this._updateGrid();
+    void this._updateGrid();
   }
 
   /**
    * The style used by the data grid.
    */
-  get style(): DataGrid.IStyle {
+  get style(): DataGridModule.DataGrid.Style {
     return this._grid.style;
   }
-  set style(value: DataGrid.IStyle) {
-    this._grid.style = value;
+  set style(value: DataGridModule.DataGrid.Style) {
+    this._grid.style = { ...this._defaultStyle, ...value };
   }
 
   /**
    * The config used to create text renderer.
    */
   set rendererConfig(rendererConfig: TextRenderConfig) {
-    this._grid.defaultRenderer = new TextRenderer({
-      textColor: rendererConfig.textColor,
-      horizontalAlignment: rendererConfig.horizontalAlignment,
-      backgroundColor: this._searchService.cellBackgroundColorRendererFunc(
-        rendererConfig
-      )
-    });
+    this._baseRenderer = rendererConfig;
+    void this._updateRenderer();
   }
 
   /**
@@ -330,16 +351,8 @@ export class CSVViewer extends Widget {
   /**
    * Go to line
    */
-  goToLine(lineNumber: number) {
-    let scrollY = 0;
-    /* The lines might not all have uniform height, so we can't just scroll to lineNumber * this._grid.baseRowSize
-    see https://github.com/jupyterlab/jupyterlab/pull/5523#issuecomment-432621391 for discussions around
-    this. It would be nice if DataGrid had a method to scroll to cell, which could be implemented more efficiently
-    because datagrid knows more about the shape of the cells. */
-    for (let i = 0; i < lineNumber - 1; i++) {
-      scrollY += this._grid.sectionSize('row', i);
-    }
-    this._grid.scrollTo(this._grid.scrollX, scrollY);
+  goToLine(lineNumber: number): void {
+    this._grid.scrollToRow(lineNumber);
   }
 
   /**
@@ -353,25 +366,55 @@ export class CSVViewer extends Widget {
   /**
    * Create the model for the grid.
    */
-  private _updateGrid(): void {
-    let data: string = this._context.model.toString();
-    let delimiter = this._delimiter;
-    let oldModel = this._grid.model as DSVModel;
-    this._grid.model = new DSVModel({ data, delimiter });
+  private async _updateGrid(): Promise<void> {
+    const { BasicSelectionModel } = await Private.ensureDataGrid();
+    const { DSVModel } = await Private.ensureDSVModel();
+    const data: string = this._context.model.toString();
+    const delimiter = this._delimiter;
+    const oldModel = this._grid.dataModel as DSVModelModule.DSVModel;
+    const dataModel = (this._grid.dataModel = new DSVModel({
+      data,
+      delimiter
+    }));
+    this._grid.selectionModel = new BasicSelectionModel({ dataModel });
     if (oldModel) {
       oldModel.dispose();
     }
   }
 
+  /**
+   * Update the renderer for the grid.
+   */
+  private async _updateRenderer(): Promise<void> {
+    if (this._baseRenderer === null) {
+      return;
+    }
+    const { TextRenderer } = await Private.ensureDataGrid();
+    const rendererConfig = this._baseRenderer;
+    const renderer = new TextRenderer({
+      textColor: rendererConfig.textColor,
+      horizontalAlignment: rendererConfig.horizontalAlignment,
+      backgroundColor:
+        this._searchService.cellBackgroundColorRendererFunc(rendererConfig)
+    });
+    this._grid.cellRenderers.update({
+      body: renderer,
+      'column-header': renderer,
+      'corner-header': renderer,
+      'row-header': renderer
+    });
+  }
+
   private _context: DocumentRegistry.Context;
-  private _grid: DataGrid;
+  private _grid: DataGridModule.DataGrid;
+  private _defaultStyle: typeof DataGridModule.DataGrid.defaultStyle;
   private _searchService: GridSearchService;
-  private _monitor: ActivityMonitor<
-    DocumentRegistry.IModel,
-    void
-  > | null = null;
+  private _monitor: ActivityMonitor<DocumentRegistry.IModel, void> | null =
+    null;
   private _delimiter = ',';
   private _revealed = new PromiseDelegate<void>();
+  private _baseRenderer: TextRenderConfig | null = null;
+  private _ready: Promise<void>;
 }
 
 /**
@@ -402,20 +445,13 @@ export class CSVDocumentWidget extends DocumentWidget<CSVViewer> {
     if (delimiter) {
       content.delimiter = delimiter;
     }
-    const csvDelimiter = new CSVDelimiter({ selected: content.delimiter });
-    this.toolbar.addItem('delimiter', csvDelimiter);
-    csvDelimiter.delimiterChanged.connect(
-      (sender: CSVDelimiter, delimiter: string) => {
-        content.delimiter = delimiter;
-      }
-    );
   }
 
   /**
    * Set URI fragment identifier for rows
    */
   setFragment(fragment: string): void {
-    let parseFragments = fragment.split('=');
+    const parseFragments = fragment.split('=');
 
     // TODO: expand to allow columns and cells to be selected
     // reference: https://tools.ietf.org/html/rfc7111#section-3
@@ -444,15 +480,10 @@ export namespace CSVDocumentWidget {
 
   export interface IOptions
     extends DocumentWidget.IOptionsOptionalContent<CSVViewer> {
+    /**
+     * Data delimiter character
+     */
     delimiter?: string;
-  }
-}
-
-namespace Private {
-  export function createContent(
-    context: DocumentRegistry.IContext<DocumentRegistry.IModel>
-  ) {
-    return new CSVViewer({ context });
   }
 }
 
@@ -468,16 +499,32 @@ export class CSVViewerFactory extends ABCWidgetFactory<
   protected createNewWidget(
     context: DocumentRegistry.Context
   ): IDocumentWidget<CSVViewer> {
-    return new CSVDocumentWidget({ context });
+    const translator = this.translator;
+    return new CSVDocumentWidget({ context, translator });
+  }
+
+  /**
+   * Default factory for toolbar items to be added after the widget is created.
+   */
+  protected defaultToolbarFactory(
+    widget: IDocumentWidget<CSVViewer>
+  ): DocumentRegistry.IToolbarItem[] {
+    return [
+      {
+        name: 'delimiter',
+        widget: new CSVDelimiter({
+          widget: widget.content,
+          translator: this.translator
+        })
+      }
+    ];
   }
 }
 
 /**
  * A widget factory for TSV widgets.
  */
-export class TSVViewerFactory extends ABCWidgetFactory<
-  IDocumentWidget<CSVViewer>
-> {
+export class TSVViewerFactory extends CSVViewerFactory {
   /**
    * Create a new widget given a context.
    */
@@ -485,6 +532,40 @@ export class TSVViewerFactory extends ABCWidgetFactory<
     context: DocumentRegistry.Context
   ): IDocumentWidget<CSVViewer> {
     const delimiter = '\t';
-    return new CSVDocumentWidget({ context, delimiter });
+    return new CSVDocumentWidget({
+      context,
+      delimiter,
+      translator: this.translator
+    });
+  }
+}
+
+namespace Private {
+  let gridLoaded: PromiseDelegate<typeof DataGridModule> | null = null;
+  let modelLoaded: PromiseDelegate<typeof DSVModelModule> | null = null;
+
+  /**
+   * Lazily load the datagrid module when the first grid is requested.
+   */
+  export async function ensureDataGrid(): Promise<typeof DataGridModule> {
+    if (gridLoaded == null) {
+      gridLoaded = new PromiseDelegate();
+      gridLoaded.resolve(await import('@lumino/datagrid'));
+    }
+    return gridLoaded.promise;
+  }
+
+  export async function ensureDSVModel(): Promise<typeof DSVModelModule> {
+    if (modelLoaded == null) {
+      modelLoaded = new PromiseDelegate();
+      modelLoaded.resolve(await import('./model'));
+    }
+    return modelLoaded.promise;
+  }
+
+  export function createContent(
+    context: DocumentRegistry.IContext<DocumentRegistry.IModel>
+  ): CSVViewer {
+    return new CSVViewer({ context });
   }
 }

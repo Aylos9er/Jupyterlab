@@ -1,27 +1,20 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import { nbformat } from '@jupyterlab/coreutils';
-
+import * as nbformat from '@jupyterlab/nbformat';
 import {
   IObservableMap,
-  ObservableMap,
   IObservableValue,
-  ObservableValue,
-  IModelDB
+  ObservableMap
 } from '@jupyterlab/observables';
-
 import {
-  IAttachmentModel,
   AttachmentModel,
+  IAttachmentModel,
   imageRendererFactory
 } from '@jupyterlab/rendermime';
-
 import { IRenderMime } from '@jupyterlab/rendermime-interfaces';
-
-import { IDisposable } from '@phosphor/disposable';
-
-import { ISignal, Signal } from '@phosphor/signaling';
+import { IDisposable } from '@lumino/disposable';
+import { ISignal, Signal } from '@lumino/signaling';
 
 /**
  * The model for attachments.
@@ -60,20 +53,18 @@ export interface IAttachmentsModel extends IDisposable {
   /**
    * Get an item for the specified key.
    */
-  get(key: string): IAttachmentModel;
+  get(key: string): IAttachmentModel | undefined;
 
   /**
    * Set the value of the specified key.
    */
   set(key: string, attachment: nbformat.IMimeBundle): void;
 
-  // TODO: This is marked optional so as to be non-breaking for 1.x
-  // Make this property mandatory for 2.0
   /**
    * Remove the attachment whose name is the specified key.
    * Note that this is optional only until Jupyterlab 2.0 release.
    */
-  remove?: (key: string) => void;
+  remove: (key: string) => void;
 
   /**
    * Clear all of the attachments.
@@ -113,11 +104,6 @@ export namespace IAttachmentsModel {
      * If not given, a default factory will be used.
      */
     contentFactory?: IContentFactory;
-
-    /**
-     * An optional IModelDB to store the attachments model.
-     */
-    modelDB?: IModelDB;
   }
 
   /**
@@ -143,28 +129,17 @@ export class AttachmentsModel implements IAttachmentsModel {
   /**
    * Construct a new observable outputs instance.
    */
-  constructor(options: IAttachmentsModel.IOptions = {}) {
+  constructor(options: IAttachmentsModel.IOptions) {
     this.contentFactory =
-      options.contentFactory || AttachmentsModel.defaultContentFactory;
+      options.contentFactory ?? AttachmentsModel.defaultContentFactory;
     if (options.values) {
-      for (let key of Object.keys(options.values)) {
-        this.set(key, options.values[key]);
+      for (const key of Object.keys(options.values)) {
+        if (options.values[key] !== undefined) {
+          this.set(key, options.values[key]!);
+        }
       }
     }
     this._map.changed.connect(this._onMapChanged, this);
-
-    // If we are given a IModelDB, keep an up-to-date
-    // serialized copy of the AttachmentsModel in it.
-    if (options.modelDB) {
-      this._modelDB = options.modelDB;
-      this._serialized = this._modelDB.createValue('attachments');
-      if (this._serialized.get()) {
-        this.fromJSON(this._serialized.get() as nbformat.IAttachments);
-      } else {
-        this._serialized.set(this.toJSON());
-      }
-      this._serialized.changed.connect(this._onSerializedChanged, this);
-    }
   }
 
   /**
@@ -229,7 +204,7 @@ export class AttachmentsModel implements IAttachmentsModel {
   /**
    * Get an item at the specified key.
    */
-  get(key: string): IAttachmentModel {
+  get(key: string): IAttachmentModel | undefined {
     return this._map.get(key);
   }
 
@@ -238,7 +213,7 @@ export class AttachmentsModel implements IAttachmentsModel {
    */
   set(key: string, value: nbformat.IMimeBundle): void {
     // Normalize stream data.
-    let item = this._createItem({ value });
+    const item = this._createItem({ value });
     this._map.set(key, item);
   }
 
@@ -265,10 +240,12 @@ export class AttachmentsModel implements IAttachmentsModel {
    * #### Notes
    * This will clear any existing data.
    */
-  fromJSON(values: nbformat.IAttachments) {
+  fromJSON(values: nbformat.IAttachments): void {
     this.clear();
     Object.keys(values).forEach(key => {
-      this.set(key, values[key]);
+      if (values[key] !== undefined) {
+        this.set(key, values[key]!);
+      }
     });
   }
 
@@ -276,9 +253,9 @@ export class AttachmentsModel implements IAttachmentsModel {
    * Serialize the model to JSON.
    */
   toJSON(): nbformat.IAttachments {
-    let ret: nbformat.IAttachments = {};
-    for (let key of this._map.keys()) {
-      ret[key] = this._map.get(key).toJSON();
+    const ret: nbformat.IAttachments = {};
+    for (const key of this._map.keys()) {
+      ret[key] = this._map.get(key)!.toJSON();
     }
     return ret;
   }
@@ -287,8 +264,8 @@ export class AttachmentsModel implements IAttachmentsModel {
    * Create an attachment item and hook up its signals.
    */
   private _createItem(options: IAttachmentModel.IOptions): IAttachmentModel {
-    let factory = this.contentFactory;
-    let item = factory.createAttachmentModel(options);
+    const factory = this.contentFactory;
+    const item = factory.createAttachmentModel(options);
     item.changed.connect(this._onGenericChange, this);
     return item;
   }
@@ -310,21 +287,6 @@ export class AttachmentsModel implements IAttachmentsModel {
   }
 
   /**
-   * If the serialized version of the outputs have changed due to a remote
-   * action, then update the model accordingly.
-   */
-  private _onSerializedChanged(
-    sender: IObservableValue,
-    args: ObservableValue.IChangedArgs
-  ) {
-    if (!this._changeGuard) {
-      this._changeGuard = true;
-      this.fromJSON(args.newValue as nbformat.IAttachments);
-      this._changeGuard = false;
-    }
-  }
-
-  /**
    * Handle a change to an item.
    */
   private _onGenericChange(): void {
@@ -335,8 +297,7 @@ export class AttachmentsModel implements IAttachmentsModel {
   private _isDisposed = false;
   private _stateChanged = new Signal<IAttachmentsModel, void>(this);
   private _changed = new Signal<this, IAttachmentsModel.ChangedArgs>(this);
-  private _modelDB: IModelDB = null;
-  private _serialized: IObservableValue = null;
+  private _serialized: IObservableValue | null = null;
   private _changeGuard = false;
 }
 
@@ -345,7 +306,7 @@ export class AttachmentsModel implements IAttachmentsModel {
  */
 export namespace AttachmentsModel {
   /**
-   * The default implementation of a `IAttachemntsModel.IContentFactory`.
+   * The default implementation of a `IAttachmentsModel.IContentFactory`.
    */
   export class ContentFactory implements IAttachmentsModel.IContentFactory {
     /**
@@ -365,7 +326,7 @@ export namespace AttachmentsModel {
 }
 
 /**
- * A resolver for cell attachments 'attchment:filename'.
+ * A resolver for cell attachments 'attachment:filename'.
  *
  * Will resolve to a data: url.
  */
@@ -380,11 +341,11 @@ export class AttachmentsResolver implements IRenderMime.IResolver {
   /**
    * Resolve a relative url to a correct server path.
    */
-  resolveUrl(url: string): Promise<string> {
+  async resolveUrl(url: string): Promise<string> {
     if (this._parent && !url.startsWith('attachment:')) {
       return this._parent.resolveUrl(url);
     }
-    return Promise.resolve(url);
+    return url;
   }
 
   /**
@@ -393,26 +354,28 @@ export class AttachmentsResolver implements IRenderMime.IResolver {
    * #### Notes
    * The returned URL may include a query parameter.
    */
-  getDownloadUrl(path: string): Promise<string> {
+  async getDownloadUrl(path: string): Promise<string> {
     if (this._parent && !path.startsWith('attachment:')) {
       return this._parent.getDownloadUrl(path);
     }
     // Return a data URL with the data of the url
     const key = path.slice('attachment:'.length);
-    if (!this._model.has(key)) {
+    const attachment = this._model.get(key);
+    if (attachment === undefined) {
       // Resolve with unprocessed path, to show as broken image
-      return Promise.resolve(path);
+      return path;
     }
-    const { data } = this._model.get(key);
+    const { data } = attachment;
     const mimeType = Object.keys(data)[0];
     // Only support known safe types:
-    if (imageRendererFactory.mimeTypes.indexOf(mimeType) === -1) {
-      return Promise.reject(
-        `Cannot render unknown image mime type "${mimeType}".`
-      );
+    if (
+      mimeType === undefined ||
+      imageRendererFactory.mimeTypes.indexOf(mimeType) === -1
+    ) {
+      throw new Error(`Cannot render unknown image mime type "${mimeType}".`);
     }
     const dataUrl = `data:${mimeType};base64,${data[mimeType]}`;
-    return Promise.resolve(dataUrl);
+    return dataUrl;
   }
 
   /**
@@ -421,7 +384,7 @@ export class AttachmentsResolver implements IRenderMime.IResolver {
    */
   isLocal(url: string): boolean {
     if (this._parent && !url.startsWith('attachment:')) {
-      return this._parent.isLocal(url);
+      return this._parent.isLocal?.(url) ?? true;
     }
     return true;
   }

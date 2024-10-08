@@ -1,32 +1,26 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
-
-import { Kernel, KernelMessage, Session } from '@jupyterlab/services';
-
-import { find } from '@phosphor/algorithm';
-
-import { JSONObject } from '@phosphor/coreutils';
-
-import { Widget } from '@phosphor/widgets';
-
-import { Text } from '@jupyterlab/coreutils';
+/**
+ * @packageDocumentation
+ * @module tooltip-extension
+ */
 
 import {
   JupyterFrontEnd,
   JupyterFrontEndPlugin
 } from '@jupyterlab/application';
-
 import { CodeEditor } from '@jupyterlab/codeeditor';
-
 import { IConsoleTracker } from '@jupyterlab/console';
-
+import { Text } from '@jupyterlab/coreutils';
 import { IEditorTracker } from '@jupyterlab/fileeditor';
-
 import { INotebookTracker } from '@jupyterlab/notebook';
-
 import { IRenderMimeRegistry } from '@jupyterlab/rendermime';
-
+import { Kernel, KernelMessage, Session } from '@jupyterlab/services';
 import { ITooltipManager, Tooltip } from '@jupyterlab/tooltip';
+import { ITranslator, nullTranslator } from '@jupyterlab/translation';
+import { find } from '@lumino/algorithm';
+import { JSONObject } from '@lumino/coreutils';
+import { Widget } from '@lumino/widgets';
 
 /**
  * The command IDs used by the tooltip plugin.
@@ -46,13 +40,20 @@ namespace CommandIDs {
  */
 const manager: JupyterFrontEndPlugin<ITooltipManager> = {
   id: '@jupyterlab/tooltip-extension:manager',
+  description: 'Provides the tooltip manager.',
   autoStart: true,
+  optional: [ITranslator],
   provides: ITooltipManager,
-  activate: (app: JupyterFrontEnd): ITooltipManager => {
+  activate: (
+    app: JupyterFrontEnd,
+    translator: ITranslator | null
+  ): ITooltipManager => {
+    const trans = (translator ?? nullTranslator).load('jupyterlab');
     let tooltip: Tooltip | null = null;
 
     // Add tooltip dismiss command.
     app.commands.addCommand(CommandIDs.dismiss, {
+      label: trans.__('Dismiss the tooltip'),
       execute: () => {
         if (tooltip) {
           tooltip.dispose();
@@ -88,16 +89,23 @@ const manager: JupyterFrontEndPlugin<ITooltipManager> = {
  * The console tooltip plugin.
  */
 const consoles: JupyterFrontEndPlugin<void> = {
+  // FIXME This should be in @jupyterlab/console-extension
   id: '@jupyterlab/tooltip-extension:consoles',
+  description: 'Adds the tooltip capability to consoles.',
   autoStart: true,
+  optional: [ITranslator],
   requires: [ITooltipManager, IConsoleTracker],
   activate: (
     app: JupyterFrontEnd,
     manager: ITooltipManager,
-    consoles: IConsoleTracker
+    consoles: IConsoleTracker,
+    translator: ITranslator | null
   ): void => {
+    const trans = (translator ?? nullTranslator).load('jupyterlab');
+
     // Add tooltip launch command.
     app.commands.addCommand(CommandIDs.launchConsole, {
+      label: trans.__('Open the tooltip'),
       execute: () => {
         const parent = consoles.currentWidget;
 
@@ -106,8 +114,8 @@ const consoles: JupyterFrontEndPlugin<void> = {
         }
 
         const anchor = parent.console;
-        const editor = anchor.promptCell.editor;
-        const kernel = anchor.session.kernel;
+        const editor = anchor.promptCell?.editor;
+        const kernel = anchor.sessionContext.session?.kernel;
         const rendermime = anchor.rendermime;
 
         // If all components necessary for rendering exist, create a tooltip.
@@ -123,16 +131,23 @@ const consoles: JupyterFrontEndPlugin<void> = {
  * The notebook tooltip plugin.
  */
 const notebooks: JupyterFrontEndPlugin<void> = {
+  // FIXME This should be in @jupyterlab/notebook-extension
   id: '@jupyterlab/tooltip-extension:notebooks',
+  description: 'Adds the tooltip capability to notebooks.',
   autoStart: true,
+  optional: [ITranslator],
   requires: [ITooltipManager, INotebookTracker],
   activate: (
     app: JupyterFrontEnd,
     manager: ITooltipManager,
-    notebooks: INotebookTracker
+    notebooks: INotebookTracker,
+    translator: ITranslator | null
   ): void => {
+    const trans = (translator ?? nullTranslator).load('jupyterlab');
+
     // Add tooltip launch command.
     app.commands.addCommand(CommandIDs.launchNotebook, {
+      label: trans.__('Open the tooltip'),
       execute: () => {
         const parent = notebooks.currentWidget;
 
@@ -141,8 +156,8 @@ const notebooks: JupyterFrontEndPlugin<void> = {
         }
 
         const anchor = parent.content;
-        const editor = anchor.activeCell.editor;
-        const kernel = parent.session.kernel;
+        const editor = anchor.activeCell?.editor;
+        const kernel = parent.sessionContext.session?.kernel;
         const rendermime = anchor.rendermime;
 
         // If all components necessary for rendering exist, create a tooltip.
@@ -158,19 +173,25 @@ const notebooks: JupyterFrontEndPlugin<void> = {
  * The file editor tooltip plugin.
  */
 const files: JupyterFrontEndPlugin<void> = {
+  // FIXME This should be in @jupyterlab/fileeditor-extension
   id: '@jupyterlab/tooltip-extension:files',
+  description: 'Adds the tooltip capability to file editors.',
   autoStart: true,
+  optional: [ITranslator],
   requires: [ITooltipManager, IEditorTracker, IRenderMimeRegistry],
   activate: (
     app: JupyterFrontEnd,
     manager: ITooltipManager,
     editorTracker: IEditorTracker,
-    rendermime: IRenderMimeRegistry
+    rendermime: IRenderMimeRegistry,
+    translator: ITranslator | null
   ): void => {
+    const trans = (translator ?? nullTranslator).load('jupyterlab');
+
     // Keep a list of active ISessions so that we can
     // clean them up when they are no longer needed.
     const activeSessions: {
-      [id: string]: Session.ISession;
+      [id: string]: Session.ISessionConnection;
     } = {};
 
     const sessions = app.serviceManager.sessions;
@@ -179,7 +200,7 @@ const files: JupyterFrontEndPlugin<void> = {
     // matching path for the file editors.
     const onRunningChanged = (
       sender: Session.IManager,
-      models: Session.IModel[]
+      models: Iterable<Session.IModel>
     ) => {
       editorTracker.forEach(file => {
         const model = find(models, m => file.context.path === m.path);
@@ -196,7 +217,7 @@ const files: JupyterFrontEndPlugin<void> = {
             delete activeSessions[file.id];
             oldSession.dispose();
           }
-          const session = sessions.connectTo(model);
+          const session = sessions.connectTo({ model });
           activeSessions[file.id] = session;
         } else {
           const session = activeSessions[file.id];
@@ -207,9 +228,7 @@ const files: JupyterFrontEndPlugin<void> = {
         }
       });
     };
-    void Session.listRunning().then(models => {
-      onRunningChanged(sessions, models);
-    });
+    onRunningChanged(sessions, sessions.running());
     sessions.runningChanged.connect(onRunningChanged);
 
     // Clean up after a widget when it is disposed
@@ -225,6 +244,7 @@ const files: JupyterFrontEndPlugin<void> = {
 
     // Add tooltip launch command.
     app.commands.addCommand(CommandIDs.launchFile, {
+      label: trans.__('Open the tooltip'),
       execute: async () => {
         const parent = editorTracker.currentWidget;
         const kernel =
@@ -234,8 +254,8 @@ const files: JupyterFrontEndPlugin<void> = {
         if (!kernel) {
           return;
         }
-        const anchor = parent.content;
-        const editor = anchor.editor;
+        const anchor = parent!.content;
+        const editor = anchor?.editor;
 
         // If all components necessary for rendering exist, create a tooltip.
         if (!!editor && !!kernel && !!rendermime) {
@@ -291,25 +311,25 @@ namespace Private {
    * Fetch a tooltip's content from the API server.
    */
   export function fetch(options: IFetchOptions): Promise<JSONObject> {
-    let { detail, editor, kernel } = options;
-    let code = editor.model.value.text;
-    let position = editor.getCursorPosition();
-    let offset = Text.jsIndexToCharIndex(editor.getOffsetAt(position), code);
+    const { detail, editor, kernel } = options;
+    const code = editor.model.sharedModel.getSource();
+    const position = editor.getCursorPosition();
+    const offset = Text.jsIndexToCharIndex(editor.getOffsetAt(position), code);
 
     // Clear hints if the new text value is empty or kernel is unavailable.
     if (!code || !kernel) {
       return Promise.reject(void 0);
     }
 
-    let contents: KernelMessage.IInspectRequestMsg['content'] = {
+    const contents: KernelMessage.IInspectRequestMsg['content'] = {
       code,
       cursor_pos: offset,
       detail_level: detail || 0
     };
-    let current = ++pending;
+    const current = ++pending;
 
     return kernel.requestInspect(contents).then(msg => {
-      let value = msg.content;
+      const value = msg.content;
 
       // If a newer request is pending, bail.
       if (current !== pending) {

@@ -10,19 +10,19 @@
       "path": "../application"
     },
     {
+      "path": "../codeeditor"
+    },
+    {
       "path": "../completer"
     },
     {
-      "path": "../console"
+      "path": "../settingregistry"
     },
     {
-      "path": "../fileeditor"
+      "path": "../translation"
     },
     {
-      "path": "../notebook"
-    },
-    {
-      "path": "../services"
+      "path": "../ui-components"
     }
   ]
 }

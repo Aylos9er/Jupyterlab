@@ -1,7 +1,10 @@
+.. Copyright (c) Jupyter Development Team.
+.. Distributed under the terms of the Modified BSD License.
+
 .. _interface:
 
 The JupyterLab Interface
-------------------------
+========================
 
 JupyterLab provides flexible building blocks for interactive,
 exploratory computing. While JupyterLab has many features found in
@@ -15,28 +18,30 @@ containing tabs of documents and activities, a collapsible :ref:`left sidebar
 terminals <running>`, the :ref:`command palette <commands>`, the :ref:`notebook
 cell tools inspector <notebook>`, and the :ref:`tabs list <tabs>`.
 
-.. image:: images/interface_jupyterlab.png
+.. image:: ../images/interface-jupyterlab.png
    :align: center
    :class: jp-screenshot
+   :alt: A screenshot of the default JupyterLab interface. The main work area is in the middle. There is also a left sidebar and a top menu bar.
 
-JupyterLab sessions always reside in a :ref:`workspace <url-workspaces-ui>`.
+JupyterLab sessions always reside in a :ref:`workspace <workspaces>`.
 Workspaces contain the state of JupyterLab: the files that are currently open,
 the layout of the application areas and tabs, etc.
 Workspaces can be saved on the server with
-:ref:`named workspace URLs <url-workspaces-ui>`.
+:ref:`named workspace URLs <url-workspaces>` or
+:ref:`using workspace commands <workspaces-gui>` available in the menu and sidebar.
 To learn more about URLs in Jupyterlab, visit :ref:`urls`.
 
 
 .. _menu-bar:
 
 Menu Bar
-~~~~~~~~
+--------
 
 The menu bar at the top of JupyterLab has top-level menus that expose
 actions available in JupyterLab with their keyboard shortcuts. The
 default menus are:
 
--  **File**: actions related to files and directories
+-  **File**: actions related to files and folders
 -  **Edit**: actions related to editing documents and other activities
 -  **View**: actions that alter the appearance of JupyterLab
 -  **Run**: actions for running code in different activities such as
@@ -50,24 +55,46 @@ default menus are:
 :ref:`JupyterLab extensions <user_extensions>` can also create new top-level menus in the menu
 bar.
 
+.. _sidebars:
+
+Left and Right Sidebar
+----------------------
+
 .. _left-sidebar:
 
-Left Sidebar
-~~~~~~~~~~~~
+The left sidebar contains a number of commonly-used tabs including:
 
-The left sidebar contains a number of commonly-used tabs, such as a file
-browser, a list of running kernels and terminals, the command palette,
-and a list of tabs in the main work area:
+- a file browser,
+- a list of tabs in the main work and of running kernels and terminals,
+- the command palette (in 3.0+ moved to a modal window accessible with a :ref:`keyboard shortcut <access-palette>`),
+- the :ref:`table of contents <toc>`,
+- the :ref:`extension manager <extension_manager>`.
 
-.. image:: images/interface_left.png
+.. image:: ../images/interface-left.png
    :align: center
    :class: jp-screenshot
+   :alt: The left JupyterLab sidebar showing a variety of files in the file browser.
+
+.. _right-sidebar:
+
+The right sidebar contains:
+
+- the property inspector (active in notebooks),
+- the :ref:`debugger <debugger>`.
+
+.. image:: ../images/interface-right.png
+   :align: center
+   :class: jp-screenshot
+   :alt: The right JupyterLab sidebar showing the property inspector.
+
+The column that allows to switch between tabs is called Activity Bar in JupyterLab.
 
 .. _left-sidebar-toggle:
 
-The left sidebar can be collapsed or expanded by selecting "Show Left Sidebar"
-in the View menu or by clicking on the active sidebar tab:
+The sidebars can be collapsed or expanded by selecting "Show Left Sidebar"
+or "Show Right Sidebar" in the View menu or by clicking on the active sidebar tab:
 
+The location of tabs can be switched between the left and the right sidebar from the :ref:`context menu <context-menus-rightclick>`.
 
 .. raw:: html
 
@@ -75,12 +102,12 @@ in the View menu or by clicking on the active sidebar tab:
      <iframe src="https://www.youtube-nocookie.com/embed/PlJGecfetek?rel=0&amp;showinfo=0" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
   </div>
 
-JupyterLab extensions can add additional panels to the left sidebar.
+JupyterLab extensions can add additional panels to the sidebars.
 
 .. _main-area:
 
 Main Work Area
-~~~~~~~~~~~~~~
+--------------
 
 .. _main-area-vid:
 
@@ -101,28 +128,30 @@ marked with a colored top border (blue by default).
 
 .. _tabs:
 
-Tabs and Single-Document Mode
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Tabs and Simple Interface Mode
+------------------------------
 
 The Tabs panel in the left sidebar lists the open documents or
 activities in the main work area:
 
-.. image:: images/interface_tabs.png
+.. image:: ../images/interface-tabs.png
    :align: center
    :class: jp-screenshot
+   :alt: The tabs panel in JupyterLab with a list of sample documents.
 
 The same information is also available in the Tabs menu:
 
-.. image:: images/interface_tabs_menu.png
+.. image:: ../images/interface-tabs-menu.png
    :align: center
    :class: jp-screenshot
+   :alt: The tabs menu in JupyterLab with a list of sample documents.
 
 .. _tabs-singledocument:
 
 It is often useful to focus on a single document or activity without closing
-other tabs in the main work area. Single-document mode enable this, while making
-it simple to return to your multi-activity layout in the main work area.
-Toggle single-document mode using the View menu:
+other tabs in the main work area. Simple Interface mode enables this, while making
+it easy to return to your multi-activity layout in the main work area.
+Toggle Simple Interface mode using the View menu:
 
 .. raw:: html
 
@@ -130,11 +159,25 @@ Toggle single-document mode using the View menu:
     <iframe src="https://www.youtube-nocookie.com/embed/DO7NOenMQC0?rel=0&amp;showinfo=0" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
   </div>
 
-When you leave single-document mode, the original layout of the main
+When you leave Simple Interface mode, the original layout of the main
 area is restored.
 
+Searching
+---------
+
+JupyterLab has an advanced built-in search plugin for finding text within a
+notebook or other document, which uses the ``Ctrl+F`` (``Cmd+F`` for macOS) shortcut by default.
+
+Your browser's ``find`` function will give unexpected results because it doesn't have
+access to the full content of a document (by default), but you can still use your browser find
+function from the browser menu if you want, or you can disable the built-in search
+shortcut using the Advanced Settings Editor.
+
+Alternatively, you can disable windowed notebook rendering to expose the full
+document content to the browser at the expense of performance.
+
 Context Menus
-~~~~~~~~~~~~~
+-------------
 
 .. _context-menus-rightclick:
 
@@ -162,7 +205,7 @@ The browser’s native context menu can be accessed by holding down
 .. _shortcuts:
 
 Keyboard Shortcuts
-~~~~~~~~~~~~~~~~~~
+------------------
 
 .. _shortcuts-settings:
 
@@ -176,6 +219,33 @@ Keyboard Shortcuts in the Settings tab.
     <div class="jp-youtube-video">
        <iframe src="https://www.youtube-nocookie.com/embed/rhW3kAExCik?rel=0&amp;showinfo=0" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
     </div>
+
+To define a custom keyboard shortcut which runs more than one command, add a keyboard shortcut
+for ``apputils:run-all-enabled`` command in Keyboard Shortcuts advanced settings. The commands you
+wish to run are passed in the ``args`` argument as a list of strings:
+
+.. code:: json
+
+    {
+      "shortcuts": [
+        {
+          "command": "apputils:run-all-enabled",
+          "keys": [
+            "Accel T"
+          ],
+          "args": {
+            "commands": [
+              "docmanager:save",
+              "application:close"
+            ]
+          },
+          "selector": "body"
+        }
+      ]
+    }
+
+In this example ``docmanager:save`` and ``application:close`` commands are mapped to ``Accel T``.
+The commands are run in succession when you use the shortcut.
 
 .. _editor-keymaps:
 

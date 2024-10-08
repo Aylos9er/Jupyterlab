@@ -20,6 +20,12 @@
     },
     {
       "path": "../services"
+    },
+    {
+      "path": "../statedb"
+    },
+    {
+      "path": "../translation"
     }
   ]
 }

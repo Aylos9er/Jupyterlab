@@ -16,10 +16,10 @@
       "path": "../codeeditor"
     },
     {
-      "path": "../console"
+      "path": "../completer"
     },
     {
-      "path": "../coreutils"
+      "path": "../console"
     },
     {
       "path": "../filebrowser"
@@ -32,6 +32,15 @@
     },
     {
       "path": "../rendermime"
+    },
+    {
+      "path": "../settingregistry"
+    },
+    {
+      "path": "../translation"
+    },
+    {
+      "path": "../ui-components"
     }
   ]
 }

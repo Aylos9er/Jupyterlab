@@ -2,17 +2,18 @@
 // Distributed under the terms of the Modified BSD License.
 //
 
-import { VDomRenderer, VDomModel, WidgetTracker } from '@jupyterlab/apputils';
-
+import { WidgetTracker } from '@jupyterlab/apputils';
 import { IChangedArgs } from '@jupyterlab/coreutils';
-
 import { GroupItem, ProgressBar, TextItem } from '@jupyterlab/statusbar';
-
-import { ArrayExt } from '@phosphor/algorithm';
-
-import { IUploadModel, FileBrowserModel, FileBrowser } from '.';
-
+import {
+  ITranslator,
+  nullTranslator,
+  TranslationBundle
+} from '@jupyterlab/translation';
+import { VDomModel, VDomRenderer } from '@jupyterlab/ui-components';
+import { ArrayExt } from '@lumino/algorithm';
 import React from 'react';
+import { FileBrowser, FileBrowserModel, IUploadModel } from '.';
 
 /**
  * Half-spacing between items in the overall status item.
@@ -22,16 +23,18 @@ const HALF_SPACING = 4;
 /**
  * A pure function component for a FileUpload status item.
  *
- * @param props: the props for the component.
+ * @param props the props for the component.
  *
  * @returns a tsx component for the file upload status.
  */
 function FileUploadComponent(
   props: FileUploadComponent.IProps
 ): React.ReactElement<FileUploadComponent.IProps> {
+  const translator = props.translator || nullTranslator;
+  const trans = translator.load('jupyterlab');
   return (
     <GroupItem spacing={HALF_SPACING}>
-      <TextItem source={'Uploading…'} />
+      <TextItem source={trans.__('Uploading…')} />
       <ProgressBar percentage={props.upload} />
     </GroupItem>
   );
@@ -49,6 +52,11 @@ namespace FileUploadComponent {
      * The current upload percentage, from 0 to 100.
      */
     upload: number;
+
+    /**
+     * The language translator.
+     */
+    translator?: ITranslator;
   }
 }
 
@@ -65,34 +73,41 @@ export class FileUploadStatus extends VDomRenderer<FileUploadStatus.Model> {
    * Construct a new FileUpload status item.
    */
   constructor(opts: FileUploadStatus.IOptions) {
-    super();
+    super(
+      new FileUploadStatus.Model(
+        opts.tracker.currentWidget && opts.tracker.currentWidget.model
+      )
+    );
+    this.translator = opts.translator || nullTranslator;
+    this._trans = this.translator.load('jupyterlab');
     this._tracker = opts.tracker;
     this._tracker.currentChanged.connect(this._onBrowserChange);
-
-    this.model = new FileUploadStatus.Model(
-      this._tracker.currentWidget && this._tracker.currentWidget.model
-    );
   }
 
   /**
    * Render the FileUpload status.
    */
-  render() {
+  render(): JSX.Element {
     const uploadPaths = this.model!.items;
     if (uploadPaths.length > 0) {
       const item = this.model!.items[0];
 
       if (item.complete) {
-        return <TextItem source="Complete!" />;
+        return <TextItem source={this._trans.__('Complete!')} />;
       } else {
-        return <FileUploadComponent upload={this.model!.items[0].progress} />;
+        return (
+          <FileUploadComponent
+            upload={this.model!.items[0].progress}
+            translator={this.translator}
+          />
+        );
       }
     } else {
-      return <FileUploadComponent upload={100} />;
+      return <FileUploadComponent upload={100} translator={this.translator} />;
     }
   }
 
-  dispose() {
+  dispose(): void {
     super.dispose();
     this._tracker.currentChanged.disconnect(this._onBrowserChange);
   }
@@ -108,6 +123,8 @@ export class FileUploadStatus extends VDomRenderer<FileUploadStatus.Model> {
     }
   };
 
+  private readonly translator: ITranslator;
+  private _trans: TranslationBundle;
   private _tracker: WidgetTracker<FileBrowser>;
 }
 
@@ -130,7 +147,7 @@ export namespace FileUploadStatus {
     /**
      * The currently uploading items.
      */
-    get items() {
+    get items(): IFileUploadItem[] {
       return this._items;
     }
 
@@ -178,15 +195,15 @@ export namespace FileUploadStatus {
           this._items[idx].progress = uploads.newValue.progress * 100;
         }
       } else if (uploads.name === 'finish') {
-        const idx = ArrayExt.findFirstIndex(
+        const finishedItem = ArrayExt.findFirstValue(
           this._items,
           val => val.path === uploads.oldValue.path
         );
 
-        if (idx !== -1) {
-          this._items[idx].complete = true;
+        if (finishedItem) {
+          finishedItem.complete = true;
           setTimeout(() => {
-            ArrayExt.removeAt(this._items, idx);
+            ArrayExt.removeFirstOf(this._items, finishedItem);
             this.stateChanged.emit(void 0);
           }, UPLOAD_COMPLETE_MESSAGE_MILLIS);
         }
@@ -212,6 +229,11 @@ export namespace FileUploadStatus {
      * The application file browser tracker.
      */
     readonly tracker: WidgetTracker<FileBrowser>;
+
+    /**
+     * The translation language bundle.
+     */
+    readonly translator?: ITranslator;
   }
 }
 

@@ -1,22 +1,33 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import { WidgetTracker } from '@jupyterlab/apputils';
+import type { WidgetTracker } from '@jupyterlab/apputils';
+import type { IStateDB } from '@jupyterlab/statedb';
+import { Token } from '@lumino/coreutils';
+import type { FileBrowser } from './browser';
 
-import { IStateDB } from '@jupyterlab/coreutils';
-
-import { Token } from '@phosphor/coreutils';
-
-import { FileBrowser } from './browser';
-
-/* tslint:disable */
 /**
- * The path tracker token.
+ * The file browser factory token.
  */
 export const IFileBrowserFactory = new Token<IFileBrowserFactory>(
-  '@jupyterlab/filebrowser:IFileBrowserFactory'
+  '@jupyterlab/filebrowser:IFileBrowserFactory',
+  `A factory object that creates file browsers.
+  Use this if you want to create your own file browser (e.g., for a custom storage backend),
+  or to interact with other file browsers that have been created by extensions.`
 );
-/* tslint:enable */
+
+/**
+ * The default file browser token.
+ */
+export const IDefaultFileBrowser = new Token<IDefaultFileBrowser>(
+  '@jupyterlab/filebrowser:IDefaultFileBrowser',
+  'A service for the default file browser.'
+);
+
+/**
+ * Default file browser type.
+ */
+export type IDefaultFileBrowser = FileBrowser;
 
 /**
  * The file browser factory interface.
@@ -49,11 +60,6 @@ export interface IFileBrowserFactory {
    * The widget tracker used by the factory to track file browsers.
    */
   readonly tracker: WidgetTracker<FileBrowser>;
-
-  /**
-   * The default file browser for the application.
-   */
-  defaultBrowser: FileBrowser;
 }
 
 /**
@@ -72,11 +78,34 @@ export namespace IFileBrowserFactory {
    */
   export interface IOptions {
     /**
+     * Whether a file browser automatically loads its initial path.
+     *
+     * #### Notes
+     * The default is `true`.
+     */
+    auto?: boolean;
+
+    /**
      * An optional `Contents.IDrive` name for the model.
      * If given, the model will prepend `driveName:` to
      * all paths used in file operations.
      */
     driveName?: string;
+
+    /**
+     * The time interval for browser refreshing, in ms.
+     */
+    refreshInterval?: number;
+
+    /**
+     * Whether a file browser automatically restores state when instantiated.
+     * The default is `true`.
+     *
+     * #### Notes
+     * The file browser model will need to be restored before for the file
+     * browser to start saving its state.
+     */
+    restore?: boolean;
 
     /**
      * The state database to use for saving file browser state and restoring it.
@@ -86,10 +115,23 @@ export namespace IFileBrowserFactory {
      * database will be automatically passed in and used for state restoration.
      */
     state?: IStateDB | null;
-
-    /**
-     * The time interval for browser refreshing, in ms.
-     */
-    refreshInterval?: number;
   }
+}
+
+/**
+ * The token that indicates the default file browser commands are loaded.
+ */
+export const IFileBrowserCommands = new Token<IFileBrowserCommands>(
+  '@jupyterlab/filebrowser:IFileBrowserCommands',
+  'A token to ensure file browser commands are loaded.'
+);
+
+/**
+ * The identifiers of loaded commands exposed for reuse.
+ */
+export interface IFileBrowserCommands {
+  /**
+   * Command for opening a file or a directory by path.
+   */
+  openPath: string;
 }

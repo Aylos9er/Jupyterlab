@@ -1,6 +1,6 @@
 {
   "name": "@jupyterlab/terminal",
-  "version": "2.0.0-alpha.1",
+  "version": "4.3.0-beta.1",
   "description": "JupyterLab - Terminal Emulator Widget",
   "homepage": "https://github.com/jupyterlab/jupyterlab",
   "bugs": {
@@ -12,14 +12,9 @@
   },
   "license": "BSD-3-Clause",
   "author": "Project Jupyter",
-  "files": [
-    "lib/*.d.ts",
-    "lib/*.js.map",
-    "lib/*.js",
-    "style/*.css"
-  ],
   "sideEffects": [
-    "style/*.css"
+    "style/*.css",
+    "style/index.js"
   ],
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -27,35 +22,55 @@
   "directories": {
     "lib": "lib/"
   },
+  "files": [
+    "lib/*.d.ts",
+    "lib/*.js.map",
+    "lib/*.js",
+    "style/*.css",
+    "style/index.js",
+    "src/**/*.{ts,tsx}"
+  ],
   "scripts": {
     "build": "tsc -b",
-    "clean": "rimraf lib",
-    "docs": "typedoc --options tdoptions.json --theme ../../typedoc-theme src",
-    "prepublishOnly": "npm run build",
+    "build:test": "tsc --build tsconfig.test.json",
+    "clean": "rimraf lib && rimraf tsconfig.tsbuildinfo",
+    "test": "jest",
+    "test:cov": "jest --collect-coverage",
+    "test:debug": "node --inspect-brk ../../node_modules/.bin/jest --runInBand",
+    "test:debug:watch": "node --inspect-brk ../../node_modules/.bin/jest --runInBand --watch",
     "watch": "tsc -b --watch"
   },
   "dependencies": {
-    "@jupyterlab/apputils": "^2.0.0-alpha.1",
-    "@jupyterlab/services": "^5.0.0-alpha.1",
-    "@phosphor/coreutils": "^1.3.1",
-    "@phosphor/domutils": "^1.1.3",
-    "@phosphor/messaging": "^1.3.0",
-    "@phosphor/widgets": "^1.9.0",
-    "xterm": "~3.13.2"
+    "@jupyterlab/apputils": "^4.4.0-beta.1",
+    "@jupyterlab/services": "^7.3.0-beta.1",
+    "@jupyterlab/translation": "^4.3.0-beta.1",
+    "@lumino/coreutils": "^2.1.2",
+    "@lumino/domutils": "^2.0.1",
+    "@lumino/messaging": "^2.0.1",
+    "@lumino/widgets": "^2.3.2",
+    "@xterm/addon-canvas": "~0.7.0",
+    "@xterm/addon-fit": "~0.10.0",
+    "@xterm/addon-web-links": "~0.11.0",
+    "@xterm/addon-webgl": "~0.18.0",
+    "@xterm/xterm": "~5.5.0"
   },
   "devDependencies": {
-    "rimraf": "~2.6.2",
-    "typedoc": "^0.14.2",
-    "typescript": "~3.5.1"
+    "@jupyterlab/testing": "^4.3.0-beta.1",
+    "@types/jest": "^29.2.0",
+    "jest": "^29.2.0",
+    "jest-canvas-mock": "^2.5.2",
+    "rimraf": "~5.0.5",
+    "typescript": "~5.1.6"
   },
   "publishConfig": {
     "access": "public"
   },
   "jupyterlab": {
     "extraStyles": {
-      "xterm": [
-        "src/xterm.css"
+      "@xterm/xterm": [
+        "css/xterm.css"
       ]
     }
-  }
+  },
+  "styleModule": "style/index.js"
 }

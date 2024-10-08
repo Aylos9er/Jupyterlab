@@ -1,7 +1,7 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import * as posix from 'path-posix';
+import { posix } from 'path';
 
 /**
  * The namespace for path-related functions.
@@ -17,7 +17,17 @@ export namespace PathExt {
    */
   export function join(...paths: string[]): string {
     const path = posix.join(...paths);
-    return path === '.' ? '' : removeSlash(posix.join(...paths));
+    return path === '.' ? '' : removeSlash(path);
+  }
+
+  /**
+   * Join all arguments together and normalize the resulting path and preserve the leading slash.
+   *
+   * @param paths - The string paths to join.
+   */
+  export function joinWithLeadingSlash(...paths: string[]): string {
+    const path = posix.join(...paths);
+    return path === '.' ? '' : path;
   }
 
   /**
@@ -39,7 +49,7 @@ export namespace PathExt {
    * @param path - The file path.
    */
   export function dirname(path: string): string {
-    let dir = removeSlash(posix.dirname(path));
+    const dir = removeSlash(posix.dirname(path));
     return dir === '.' ? '' : dir;
   }
 
@@ -59,23 +69,6 @@ export namespace PathExt {
    */
   export function extname(path: string): string {
     return posix.extname(path);
-  }
-
-  /**
-   * Get the last portion of a path, without its extension (if any).
-   *
-   * @param path - The file path.
-   *
-   * @returns the last part of the path, sans extension.
-   */
-  export function stem(path: string): string {
-    return path
-      .split('\\')
-      .pop()
-      .split('/')
-      .pop()
-      .split('.')
-      .shift();
   }
 
   /**
@@ -99,18 +92,18 @@ export namespace PathExt {
    * @param parts - The paths to join.
    *
    * #### Notes
-   * The right-most parameter is considered {to}.  Other parameters are considered an array of {from}.
+   * The right-most parameter is considered \{to\}.  Other parameters are considered an array of \{from\}.
    *
-   * Starting from leftmost {from} parameter, resolves {to} to an absolute path.
+   * Starting from leftmost \{from\} parameter, resolves \{to\} to an absolute path.
    *
-   * If {to} isn't already absolute, {from} arguments are prepended in right to left order, until an absolute path is found. If after using all {from} paths still no absolute path is found, the current working directory is used as well. The resulting path is normalized, and trailing slashes are removed unless the path gets resolved to the root directory.
+   * If \{to\} isn't already absolute, \{from\} arguments are prepended in right to left order, until an absolute path is found. If after using all \{from\} paths still no absolute path is found, the current working directory is used as well. The resulting path is normalized, and trailing slashes are removed unless the path gets resolved to the root directory.
    */
   export function resolve(...parts: string[]): string {
     return removeSlash(posix.resolve(...parts));
   }
 
   /**
-   * Solve the relative path from {from} to {to}.
+   * Solve the relative path from \{from\} to \{to\}.
    *
    * @param from - The source path.
    *
@@ -144,7 +137,7 @@ export namespace PathExt {
   /**
    * Remove the leading slash from a path.
    *
-   * @param path: the path from which to remove a leading slash.
+   * @param path the path from which to remove a leading slash.
    */
   export function removeSlash(path: string): string {
     if (path.indexOf('/') === 0) {

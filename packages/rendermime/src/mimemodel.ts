@@ -1,10 +1,9 @@
-/*-----------------------------------------------------------------------------
+/* -----------------------------------------------------------------------------
 | Copyright (c) Jupyter Development Team.
 | Distributed under the terms of the Modified BSD License.
 |----------------------------------------------------------------------------*/
-import { ReadonlyJSONObject } from '@phosphor/coreutils';
-
 import { IRenderMime } from '@jupyterlab/rendermime-interfaces';
+import { ReadonlyPartialJSONObject } from '@lumino/coreutils';
 
 /**
  * The default mime model implementation.
@@ -28,14 +27,14 @@ export class MimeModel implements IRenderMime.IMimeModel {
   /**
    * The data associated with the model.
    */
-  get data(): ReadonlyJSONObject {
+  get data(): ReadonlyPartialJSONObject {
     return this._data;
   }
 
   /**
    * The metadata associated with the model.
    */
-  get metadata(): ReadonlyJSONObject {
+  get metadata(): ReadonlyPartialJSONObject {
     return this._metadata;
   }
 
@@ -53,8 +52,8 @@ export class MimeModel implements IRenderMime.IMimeModel {
   }
 
   private _callback: (options: IRenderMime.IMimeModel.ISetDataOptions) => void;
-  private _data: ReadonlyJSONObject;
-  private _metadata: ReadonlyJSONObject;
+  private _data: ReadonlyPartialJSONObject;
+  private _metadata: ReadonlyPartialJSONObject;
 }
 
 /**
@@ -78,12 +77,12 @@ export namespace MimeModel {
     /**
      * The initial mime data.
      */
-    data?: ReadonlyJSONObject;
+    data?: ReadonlyPartialJSONObject;
 
     /**
      * The initial mime metadata.
      */
-    metadata?: ReadonlyJSONObject;
+    metadata?: ReadonlyPartialJSONObject;
   }
 }
 
@@ -94,7 +93,7 @@ namespace Private {
   /**
    * A no-op callback function.
    */
-  export function noOp() {
+  export function noOp(): void {
     /* no-op */
   }
 }

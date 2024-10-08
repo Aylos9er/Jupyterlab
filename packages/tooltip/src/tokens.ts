@@ -1,24 +1,19 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import { Kernel } from '@jupyterlab/services';
-
-import { Token } from '@phosphor/coreutils';
-
-import { Widget } from '@phosphor/widgets';
-
 import { CodeEditor } from '@jupyterlab/codeeditor';
-
 import { IRenderMimeRegistry } from '@jupyterlab/rendermime';
+import { Kernel } from '@jupyterlab/services';
+import { Token } from '@lumino/coreutils';
+import { Widget } from '@lumino/widgets';
 
-/* tslint:disable */
 /**
  * The tooltip manager token.
  */
 export const ITooltipManager = new Token<ITooltipManager>(
-  '@jupyterlab/tooltip:ITooltipManager'
+  '@jupyterlab/tooltip:ITooltipManager',
+  'A service for the tooltip manager for the application. Use this to allow your extension to invoke a tooltip.'
 );
-/* tslint:enable */
 
 /**
  * A manager to register tooltips with parent widgets.
@@ -31,7 +26,7 @@ export interface ITooltipManager {
 }
 
 /**
- * A namespace for `ICompletionManager` interface specifications.
+ * A namespace for `ITooltipManager` interface specifications.
  */
 export namespace ITooltipManager {
   /**

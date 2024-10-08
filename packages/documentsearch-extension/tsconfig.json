@@ -16,7 +16,10 @@
       "path": "../documentsearch"
     },
     {
-      "path": "../mainmenu"
+      "path": "../settingregistry"
+    },
+    {
+      "path": "../translation"
     }
   ]
 }

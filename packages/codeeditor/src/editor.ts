@@ -1,22 +1,15 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import { JSONObject } from '@phosphor/coreutils';
-
-import { IDisposable } from '@phosphor/disposable';
-
-import { ISignal, Signal } from '@phosphor/signaling';
-
+import type { Extension } from '@codemirror/state';
+import { ISharedText, YFile } from '@jupyter/ydoc';
 import { IChangedArgs } from '@jupyterlab/coreutils';
-
-import {
-  IModelDB,
-  ModelDB,
-  IObservableValue,
-  ObservableValue,
-  IObservableMap,
-  IObservableString
-} from '@jupyterlab/observables';
+import { IObservableMap, ObservableMap } from '@jupyterlab/observables';
+import { ITranslator } from '@jupyterlab/translation';
+import { JSONObject } from '@lumino/coreutils';
+import { IDisposable } from '@lumino/disposable';
+import { ISignal, Signal } from '@lumino/signaling';
+import { IEditorMimeTypeService } from './mimetype';
 
 /**
  * A namespace for code editors.
@@ -60,7 +53,8 @@ export namespace CodeEditor {
   /**
    * An interface describing editor state coordinates.
    */
-  export interface ICoordinate extends JSONObject, ClientRect {}
+  export interface ICoordinate
+    extends Pick<DOMRectReadOnly, 'left' | 'right' | 'top' | 'bottom'> {}
 
   /**
    * A range.
@@ -86,35 +80,6 @@ export namespace CodeEditor {
   }
 
   /**
-   * A selection style.
-   */
-  export interface ISelectionStyle extends JSONObject {
-    /**
-     * A class name added to a selection.
-     */
-    className: string;
-
-    /**
-     * A display name added to a selection.
-     */
-    displayName: string;
-
-    /**
-     * A color for UI elements.
-     */
-    color: string;
-  }
-
-  /**
-   * The default selection style.
-   */
-  export const defaultSelectionStyle: ISelectionStyle = {
-    className: '',
-    displayName: '',
-    color: 'black'
-  };
-
-  /**
    * A text selection.
    */
   export interface ITextSelection extends IRange {
@@ -122,11 +87,6 @@ export namespace CodeEditor {
      * The uuid of the text selection owner.
      */
     readonly uuid: string;
-
-    /**
-     * The style of this selection.
-     */
-    readonly style: ISelectionStyle;
   }
 
   /**
@@ -176,11 +136,6 @@ export namespace CodeEditor {
     mimeTypeChanged: ISignal<IModel, IChangedArgs<string>>;
 
     /**
-     * The text stored in the model.
-     */
-    readonly value: IObservableString;
-
-    /**
      * A mime type of the model.
      *
      * #### Notes
@@ -194,10 +149,9 @@ export namespace CodeEditor {
     readonly selections: IObservableMap<ITextSelection[]>;
 
     /**
-     * The underlying `IModelDB` instance in which model
-     * data is stored.
+     * The shared model for the cell editor.
      */
-    readonly modelDB: IModelDB;
+    readonly sharedModel: ISharedText;
   }
 
   /**
@@ -207,30 +161,18 @@ export namespace CodeEditor {
     /**
      * Construct a new Model.
      */
-    constructor(options?: Model.IOptions) {
-      options = options || {};
-
-      if (options.modelDB) {
-        this.modelDB = options.modelDB;
-      } else {
-        this.modelDB = new ModelDB();
-      }
-
-      let value = this.modelDB.createString('value');
-      value.text = value.text || options.value || '';
-
-      let mimeType = this.modelDB.createValue('mimeType');
-      mimeType.set(options.mimeType || 'text/plain');
-      mimeType.changed.connect(this._onMimeTypeChanged, this);
-
-      this.modelDB.createMap('selections');
+    constructor(options: Model.IOptions = {}) {
+      // Track if we need to dispose the model or not.
+      this.standaloneModel = typeof options.sharedModel === 'undefined';
+      this.sharedModel = options.sharedModel ?? new YFile();
+      this._mimeType =
+        options.mimeType ?? IEditorMimeTypeService.defaultMimeType;
     }
 
     /**
-     * The underlying `IModelDB` instance in which model
-     * data is stored.
+     * The shared model for the cell editor.
      */
-    readonly modelDB: IModelDB;
+    readonly sharedModel: ISharedText;
 
     /**
      * A signal emitted when a mimetype changes.
@@ -240,31 +182,29 @@ export namespace CodeEditor {
     }
 
     /**
-     * Get the value of the model.
-     */
-    get value(): IObservableString {
-      return this.modelDB.get('value') as IObservableString;
-    }
-
-    /**
      * Get the selections for the model.
      */
     get selections(): IObservableMap<ITextSelection[]> {
-      return this.modelDB.get('selections') as IObservableMap<ITextSelection[]>;
+      return this._selections;
     }
 
     /**
      * A mime type of the model.
      */
     get mimeType(): string {
-      return this.modelDB.getValue('mimeType') as string;
+      return this._mimeType;
     }
     set mimeType(newValue: string) {
       const oldValue = this.mimeType;
       if (oldValue === newValue) {
         return;
       }
-      this.modelDB.setValue('mimeType', newValue);
+      this._mimeType = newValue;
+      this._mimeTypeChanged.emit({
+        name: 'mimeType',
+        oldValue: oldValue,
+        newValue: newValue
+      });
     }
 
     /**
@@ -282,22 +222,21 @@ export namespace CodeEditor {
         return;
       }
       this._isDisposed = true;
-      this.value.text = '';
+      this._selections.dispose();
+      if (this.standaloneModel) {
+        this.sharedModel.dispose();
+      }
       Signal.clearData(this);
     }
 
-    private _onMimeTypeChanged(
-      mimeType: IObservableValue,
-      args: ObservableValue.IChangedArgs
-    ): void {
-      this._mimeTypeChanged.emit({
-        name: 'mimeType',
-        oldValue: args.oldValue as string,
-        newValue: args.newValue as string
-      });
-    }
+    /**
+     * Whether the model should disposed the shared model on disposal or not.
+     */
+    protected standaloneModel = false;
 
     private _isDisposed = false;
+    private _selections = new ObservableMap<ITextSelection[]>();
+    private _mimeType = IEditorMimeTypeService.defaultMimeType;
     private _mimeTypeChanged = new Signal<this, IChangedArgs<string>>(this);
   }
 
@@ -319,11 +258,15 @@ export namespace CodeEditor {
      * Set the primary position of the cursor.
      *
      * @param position - The new primary position.
+     * @param options - Adjustment options allowing to disable scrolling.
      *
      * #### Notes
      * This will remove any secondary cursors.
      */
-    setCursorPosition(position: IPosition): void;
+    setCursorPosition(
+      position: IPosition,
+      options?: { scroll?: boolean }
+    ): void;
 
     /**
      * Returns the primary selection, never `null`.
@@ -377,17 +320,15 @@ export namespace CodeEditor {
 
   /**
    * A widget that provides a code editor.
+   *
+   * As of JupyterLab 4.0.0, it is not possible to provide an editor
+   * that is different of CodeMirror 6.
    */
   export interface IEditor extends ISelectionOwner, IDisposable {
     /**
      * A signal emitted when either the top or bottom edge is requested.
      */
     readonly edgeRequested: ISignal<IEditor, EdgeLocation>;
-
-    /**
-     * The default selection style for the editor.
-     */
-    selectionStyle: CodeEditor.ISelectionStyle;
 
     /**
      * The DOM node that hosts the editor.
@@ -410,19 +351,33 @@ export namespace CodeEditor {
     readonly charWidth: number;
 
     /**
-     * Get the number of lines in the eidtor.
+     * Get the number of lines in the editor.
      */
     readonly lineCount: number;
 
     /**
      * Get a config option for the editor.
      */
-    getOption<K extends keyof IConfig>(option: K): IConfig[K];
+    getOption(option: string): unknown;
 
     /**
      * Set a config option for the editor.
      */
-    setOption<K extends keyof IConfig>(option: K, value: IConfig[K]): void;
+    setOption(option: string, value: unknown): void;
+
+    /**
+     * Set config options for the editor.
+     */
+    setOptions(options: Record<string, any>): void;
+
+    /**
+     * Inject an extension into the editor
+     *
+     * @alpha
+     * @experimental
+     * @param ext Editor extension
+     */
+    injectExtension(ext: Extension): void;
 
     /**
      * Returns the content for the given line number.
@@ -488,38 +443,6 @@ export namespace CodeEditor {
     blur(): void;
 
     /**
-     * Repaint the editor.
-     *
-     * #### Notes
-     * A repainted editor should fit to its host node.
-     */
-    refresh(): void;
-
-    /**
-     * Resize the editor to fit its host node.
-     */
-    resizeToFit(): void;
-
-    /**
-     * Add a keydown handler to the editor.
-     *
-     * @param handler - A keydown handler.
-     *
-     * @returns A disposable that can be used to remove the handler.
-     */
-    addKeydownHandler(handler: KeydownHandler): IDisposable;
-
-    /**
-     * Set the size of the editor.
-     *
-     * @param size - The desired size.
-     *
-     * #### Notes
-     * Use `null` if the size is unknown.
-     */
-    setSize(size: IDimension | null): void;
-
-    /**
      * Reveals the given position in the editor.
      *
      * @param position - The desired position to reveal.
@@ -529,7 +452,7 @@ export namespace CodeEditor {
     /**
      * Reveals the given selection in the editor.
      *
-     * @param position - The desired selection to reveal.
+     * @param selection - The desired selection to reveal.
      */
     revealSelection(selection: IRange): void;
 
@@ -540,7 +463,7 @@ export namespace CodeEditor {
      *
      * @returns The coordinates of the position.
      */
-    getCoordinateForPosition(position: IPosition): ICoordinate;
+    getCoordinateForPosition(position: IPosition): ICoordinate | null;
 
     /**
      * Get the cursor position given window coordinates.
@@ -553,118 +476,35 @@ export namespace CodeEditor {
     getPositionForCoordinate(coordinate: ICoordinate): IPosition | null;
 
     /**
+     * Get a list of tokens for the current editor text content.
+     */
+    getTokens(): CodeEditor.IToken[];
+
+    /**
+     * Get the token at a given editor position.
+     */
+    getTokenAt(offset: number): CodeEditor.IToken;
+
+    /**
+     * Get the token a the cursor position.
+     */
+    getTokenAtCursor(): CodeEditor.IToken;
+
+    /**
      * Inserts a new line at the cursor position and indents it.
      */
     newIndentedLine(): void;
 
     /**
-     * Gets the token at a given position.
+     * Replaces selection with the given text.
      */
-    getTokenForPosition(position: IPosition): IToken;
-
-    /**
-     * Gets the list of tokens for the editor model.
-     */
-    getTokens(): IToken[];
+    replaceSelection?(text: string): void;
   }
 
   /**
    * A factory used to create a code editor.
    */
   export type Factory = (options: IOptions) => CodeEditor.IEditor;
-
-  /**
-   * The configuration options for an editor.
-   */
-  export interface IConfig {
-    /**
-     * User preferred font family for text editors.
-     */
-    fontFamily: string | null;
-
-    /**
-     * User preferred size in pixel of the font used in text editors.
-     */
-    fontSize: number | null;
-
-    /**
-     * User preferred text line height, as a multiplier of font size.
-     */
-    lineHeight: number | null;
-
-    /**
-     * Whether line numbers should be displayed.
-     */
-    lineNumbers: boolean;
-
-    /**
-     * Control the line wrapping of the editor. Possible values are:
-     * - "off", lines will never wrap.
-     * - "on", lines will wrap at the viewport border.
-     * - "wordWrapColumn", lines will wrap at `wordWrapColumn`.
-     * - "bounded", lines will wrap at minimum between viewport width and wordWrapColumn.
-     */
-    lineWrap: 'off' | 'on' | 'wordWrapColumn' | 'bounded';
-
-    /**
-     * Whether the editor is read-only.
-     */
-    readOnly: boolean;
-
-    /**
-     * The number of spaces a tab is equal to.
-     */
-    tabSize: number;
-
-    /**
-     * Whether to insert spaces when pressing Tab.
-     */
-    insertSpaces: boolean;
-
-    /**
-     * Whether to highlight matching brackets when one of them is selected.
-     */
-    matchBrackets: boolean;
-
-    /**
-     * Whether to automatically close brackets after opening them.
-     */
-    autoClosingBrackets: boolean;
-
-    /**
-     * The column where to break text line.
-     */
-    wordWrapColumn: number;
-
-    /**
-     * Column index at which rulers should be added.
-     */
-    rulers: Array<number>;
-
-    /**
-     * Wheter to allow code folding
-     */
-    codeFolding: boolean;
-  }
-
-  /**
-   * The default configuration options for an editor.
-   */
-  export let defaultConfig: IConfig = {
-    fontFamily: null,
-    fontSize: null,
-    lineHeight: null,
-    lineNumbers: false,
-    lineWrap: 'on',
-    wordWrapColumn: 80,
-    readOnly: false,
-    tabSize: 4,
-    insertSpaces: true,
-    matchBrackets: true,
-    autoClosingBrackets: true,
-    rulers: [],
-    codeFolding: false
-  };
 
   /**
    * The options used to initialize an editor.
@@ -681,27 +521,37 @@ export namespace CodeEditor {
     model: IModel;
 
     /**
-     * The desired uuid for the editor.
+     * The configuration options for the editor.
      */
-    uuid?: string;
+    config?: Record<string, any>;
 
     /**
-     * The default selection style for the editor.
+     * List of editor extensions to be added.
      */
-    selectionStyle?: Partial<CodeEditor.ISelectionStyle>;
+    extensions?: Extension[];
+
+    /**
+     * Whether the editor will be inline or not.
+     */
+    inline?: boolean;
 
     /**
      * The configuration options for the editor.
      */
-    config?: Partial<IConfig>;
+    translator?: ITranslator;
+
+    /**
+     * The desired uuid for the editor.
+     */
+    uuid?: string;
   }
 
   export namespace Model {
     export interface IOptions {
       /**
-       * The initial value of the model.
+       * A unique identifier for the model.
        */
-      value?: string;
+      id?: string;
 
       /**
        * The mimetype of the model.
@@ -709,9 +559,9 @@ export namespace CodeEditor {
       mimeType?: string;
 
       /**
-       * An optional modelDB for storing model state.
+       * Shared editor text.
        */
-      modelDB?: IModelDB;
+      sharedModel?: ISharedText;
     }
   }
 }

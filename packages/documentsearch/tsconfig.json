@@ -10,22 +10,10 @@
       "path": "../apputils"
     },
     {
-      "path": "../cells"
+      "path": "../translation"
     },
     {
-      "path": "../codeeditor"
-    },
-    {
-      "path": "../codemirror"
-    },
-    {
-      "path": "../coreutils"
-    },
-    {
-      "path": "../fileeditor"
-    },
-    {
-      "path": "../notebook"
+      "path": "../ui-components"
     }
   ]
 }
